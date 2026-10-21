@@ -2,177 +2,294 @@
 
 For this lab, you will:
 
-1. Implement an ADC driver, with DMA-driven sampling of the on-board
-   internal temperature sensor.
-2. Implement a UART/serial driver with an independent DMA-backed circular
+1. Implement an ADC driver with DriverLib that uses DMA to sample the
+   on-chip temperature sensor.
+2. Implement a register-level UART driver with an interrupt-driven circular
    receive buffer.
-3. Implement a hardware-accelerated CRC-32 driver, register-level against
-   the on-chip CRC accelerator, and benchmark it against a supplied software
-   CRC-32 implementation.
-4. Write the ADC-to-temperature conversion yourself.
-5. Use FreeRTOS to build a request/response system between two boards
-   playing different roles: a **sensor** board samples its internal
-   temperature sensor and a **display** board requests readings and shows
-   them on an RGB LED.
+3. Implement a register-level driver for the on-chip CRC-32 accelerator and
+   benchmark it against a supplied software CRC-32.
+4. Convert raw ADC samples into temperatures.
+5. Use FreeRTOS to build a request/response link between two boards: a
+   **sensor** board and a **display** board.
 
 ## Use cases
 
-Consider this a component of a larger product. Products where a sensor node
-answering on-demand requests over a CRC-protected UART link (or one like it)
-would be used include:
-
-- A central controller polling one or more remote sensor nodes on demand
-  instead of being flooded with a constant stream of readings
-- Environmental monitoring systems where a display/control unit is
-  physically separate from the sensing hardware
-- Any point-to-point serial link where corrupted data must be detected
-  before it's acted on
+- A central controller polling remote sensor nodes on demand
+- Monitoring systems where the display is separate from the sensing hardware
+- Any serial link where corrupted data must be caught before it's used
 
 ## Overview
 
-This lab requires FreeRTOS. Two boards play two different roles:
+Both roles live in `lab5_adc_uart_crc.cpp`. Set `this_device` near the top
+of the file to pick the role, then rebuild and flash. The `if constexpr` in
+`main()` compiles in only that role's code.
 
-- The **sensor** board has its internal temperature sensor wired to its
-  ADC. It waits for a one-byte request from the display board, then
-  samples, converts, and replies with a batch of readings.
-- The **display** board has the RGB LED and the S1/S2 buttons. Pressing
-  either button asks the sensor board for a fresh batch of readings, then
-  shows the result as a color: blue for cold, yellow for warm, red for hot
-  (the exact temperature bands are your call).
+The exchange:
 
-Both roles are implemented in the same `lab5_adc_uart_crc.cpp` file. A
-`constexpr device_role this_device` near the top of the file picks which
-role's tasks `main()` creates, and an `if constexpr` in `main()` compiles in
-only that role's task. The other role's code is discarded at compile time,
-so a single codebase produces either board's firmware. For this lab, flip
-`this_device` by hand and rebuild before flashing each board; the comment
-above it explains how you'd instead drive this from a compiler define on
-the build system's command line if you wanted, say, a CI job to build both
-roles from one invocation without hand-editing source.
+1. **Display:** wait for S1 or S2, then send `sample_request_command` (one
+   byte) to the sensor board.
+2. **Sensor:** take 64 temperature samples in one DMA transfer, convert
+   them, append a CRC-32, and send the packet back. If the sensor board's S1
+   or S2 (your choice) is held while sending, flip one bit in the packet
+   after computing the CRC.
+3. **Display:** check the CRC. If it matches, set the RGB LED from the
+   readings: blue for cold, yellow for warm, red for hot (you pick the
+   bands). If it doesn't, drop the packet, print a message, and turn the LED
+   magenta.
 
-The exchange itself:
+**Packet format:** 64 temperature samples followed by a 4-byte CRC. The
+sample encoding is your choice, as long as it resolves at least 0.5 degC (a
+whole-degree integer can't). Agree on the encoding and byte order as a team
+on day one, since both boards depend on it.
 
-1. Display board: wait for S1 or S2 to be pressed, then transmit a one-byte
-   command to the sensor board.
-2. Sensor board: on receiving that command, fill a 64-sample buffer from
-   its internal temperature sensor in a single DMA-backed ADC transfer,
-   convert each raw sample to a temperature value, compute a CRC-32 over the
-   batch with both your `crc32_hardware` driver and the supplied
-   `crc32_software` reference (timing each with a `lab2::steady_clock` and
-   printing both durations, so you can see which is faster), and transmit
-   the 64 temperature values with the CRC appended over UART. Before
-   transmitting, poll one of its own buttons (S1 or S2, your choice). If
-   it's being held down, flip one bit somewhere in the outgoing packet
-   before sending it. This doesn't need an interrupt; a plain level read at
-   transmit time is enough. It gives you an on-demand way to demonstrate the
-   CRC check catching corrupted data without editing and reflashing code.
-3. Display board: receive the batch, validate its CRC, and set the RGB LED
-   color from the readings. If the CRC is invalid, drop the packet, print an
-   appropriate message, and turn the RGB LED magenta instead of updating it
-   with a color derived from the (untrustworthy) readings.
+## Rules
 
-The wire format for a single temperature value is your choice, as long as
-it can resolve at least 0.5 degC steps. A plain whole-degree integer
-cannot. Both boards need to agree on whatever encoding you pick, since one
-side writes it and the other reads it back.
+- **DriverLib is required for the ADC driver**, including its DMA setup.
+  The UART and CRC drivers are register-level.
+- **All DriverLib calls go inside your driver classes.** Don't configure
+  peripherals in SysConfig.
 
-Each of these should be its own class function (or set of class functions)
-added to the `adc_driver`, `serial_driver`, and `crc32_hardware` classes
-within the `lab5_adc_uart_crc.cpp` file. All three drivers are written from
-scratch, register-level - no DriverLib anywhere in this lab. That includes
-reading the internal temperature sensor's factory calibration constants -
-look for how they're stored in the MSPM0G350x Technical Reference Manual
-and datasheet, the same way you'd track down any other register.
+## FreeRTOS tasks
 
-`adc16_stream` fills an entire buffer per call, rather than returning one
-sample at a time - the ADC driver must use DMA to configure a single
-transfer that fills the whole buffer, put the calling task to sleep using
-FreeRTOS for the duration of that transfer, and let the DMA
-transfer-complete interrupt wake it once the buffer is full (one sleep per
-buffer, not one per sample). The UART driver's receive side must similarly
-be backed by a circular buffer that a **separate** DMA transfer (or
-interrupt) fills continuously in the background - see `receive_cursor()`'s
-docs in `serial.hpp` for how a caller is expected to consume it. That means
-the sensor board runs two independent DMA-backed transfers at once: one for
-the ADC, one for UART reception. `crc32_software` is supplied and already
-implemented; use it as-is to check your `crc32_hardware` driver's output
-and as the baseline for the timing comparison.
+**Sensor board: three tasks**
 
-> [!NOTE]
-> Strictly speaking, this lab doesn't require FreeRTOS to work. The
-> DMA-transfer-complete wake-up could just as well be done synchronously -
-> the driver itself blocking on a completion flag - without an RTOS in the
-> picture at all. FreeRTOS is used here anyway, mainly to get you writing
-> against it before the final project.
+- `request_task`: watches the UART for `sample_request_command`, then gives
+  the `sample_request` semaphore.
+- `sampler_task`: waits on `sample_request`, reads 64 ADC samples, converts
+  them, and sends them to `batch_queue`.
+- `transmit_task`: waits on `batch_queue`, computes both CRCs, and sends the
+  packet.
 
-## Learning Objectives
+**Display board: one task**
 
-- Implement a buffer-filling ADC driver, register-level with DMA, that
-  frees the CPU (via putting its calling task to sleep) for the duration of
-  a whole buffered transfer rather than per sample.
-- Implement a UART driver with a DMA-backed circular receive buffer.
-- Implement a register-level driver for the on-chip CRC-32 accelerator, and
-  measure how much it outperforms a software CRC-32 implementation.
-- Convert a raw ADC sample from the internal temperature sensor into an
-  actual temperature value.
-- Design a simple request/response protocol between two independently
-  running devices with different roles.
-- Use `if constexpr` on a compile-time constant to build one codebase into
-  either of two different firmware images.
-- Detect corrupted data using a checksum computed on both ends of a link.
+- `display_task`: sends the request on S1/S2, waits for the packet,
+  validates the CRC, and sets the LED.
+
+**How the sensor tasks pass data**
+
+```text
+UART RX
+   |
+request_task
+   |   sample_request (binary semaphore): "take a batch now"
+   v
+sampler_task   <-- ADC0_IRQHandler (task notification): "buffer is full"
+   |   batch_queue (queue): a copy of the 64 converted samples
+   v
+transmit_task
+   |
+UART TX
+```
+
+- `sample_request` carries no data, only the signal to start.
+- `batch_queue` carries the data. Each item is a full copy of the 64
+  samples, so the two tasks never share a buffer.
+- The task notification lives inside `adc.read()`.
+
+## Team roles
+
+Each person owns one role and defends it at check-off. List the owners in
+your PR description. Open your role's guide below; you only need to read
+your own.
+
+<details>
+<summary><b>1. ADC: ADC/DMA driver, temperature conversion, <code>sampler_task</code></b></summary>
+
+Two MSPM0 SDK examples cover most of this:
+`examples/nortos/LP_MSPM0G3507/driverlib/adc12_14bit_resolution` (ADC with
+DMA) and `adc12_internal_temp_sensor_mathacl` (temperature sensor). Their
+`ti_msp_dl_config.c` files show the DriverLib calls SysConfig generates.
+Move those calls into your driver.
+
+**Constructor**
+
+1. `DL_ADC12_reset()` and `DL_ADC12_enablePower()` on `ADC0`, then wait for
+   it to power up.
+2. `DL_ADC12_setClockConfig()`: SYSOSC as the clock source.
+3. `DL_ADC12_initSingleSample()`: repeat mode, software trigger, 12-bit,
+   unsigned.
+4. `DL_ADC12_configConversionMem()`: MEM0 reads `DL_ADC12_INPUT_CHAN_11`
+   (the temperature sensor) against the VDDA reference.
+5. `DL_ADC12_setSampleTime0()`: at least 12.5 us. Compute the cycle count
+   from your ADC clock.
+6. `DL_ADC12_setDMASamplesCnt(ADC0, 1)` and
+   `DL_ADC12_enableDMATrigger(ADC0, DL_ADC12_DMA_MEM0_RESULT_LOADED)`. Enable
+   the `DL_ADC12_INTERRUPT_DMA_DONE` interrupt and `ADC0_INT_IRQn` in the
+   NVIC.
+7. `DL_DMA_initChannel()`: trigger `DMA_ADC0_EVT_GEN_BD_TRIG`, half-word
+   source and destination, fixed source address, incrementing destination.
+   The source address is
+   `DL_ADC12_getMemResultAddress(ADC0, DL_ADC12_MEM_IDX_0)`.
+8. `DL_ADC12_enableConversions()`.
+
+**Each `read()`**
+
+1. Disable the DMA channel, point its destination at the buffer, set the
+   transfer size to the buffer's size, and re-enable it.
+2. `DL_ADC12_enableDMA()`. The ADC clears this bit after every completed
+   transfer.
+3. Save the calling task's handle from `xTaskGetCurrentTaskHandle()`
+   somewhere the interrupt handler can reach, like a file-scope variable.
+   Do this before starting the conversion.
+4. `DL_ADC12_startConversion()`, then sleep with
+   `ulTaskNotifyTake(pdTRUE, portMAX_DELAY)`.
+5. Once woken, `DL_ADC12_stopConversion()`, then upscale each 12-bit sample
+   to 16 bits as `adc.hpp` requires.
+
+**Interrupt handler**
+
+1. Define `extern "C" void ADC0_IRQHandler()`. DMA completion is reported
+   through the ADC's interrupt.
+2. Check that `DL_ADC12_getPendingInterrupt(ADC0)` returns
+   `DL_ADC12_IIDX_DMA_DONE`.
+3. Declare `BaseType_t higher_priority_task_woken = pdFALSE;` and call
+   `vTaskNotifyGiveFromISR(saved_handle, &higher_priority_task_woken)`.
+4. End with `portYIELD_FROM_ISR(higher_priority_task_woken)` so the woken
+   task runs as soon as the handler returns.
+
+**Temperature conversion**
+
+- `TEMP_SENSE0` at `0x41C4003C` holds the factory calibration value
+  (`DL_SYSCTL_getTempCalibrationConstant()` reads it). It's the 12-bit ADC
+  code measured at 30 degC with the 3.3 V VDD reference.
+- The sensor's output changes by TSc = -1.8 mV/degC (datasheet section
+  7.14).
+- `T = 30 + (V_sample - V_trim) / TSc`, where each voltage is
+  `3.3 V * code / 4096`.
+- Your samples are upscaled to 16 bits, so scale either them or the
+  calibration value so both use the same units.
+
+**`sampler_task`**
+
+1. Block in `xSemaphoreTake(sample_request, portMAX_DELAY)`.
+2. Call `adc.read()` on a `std::array<std::uint16_t, 64>`.
+3. Convert each sample to `temperature_sample_t`.
+4. `xQueueSend(batch_queue, &samples, portMAX_DELAY)` copies the converted
+   array into the queue.
+
+</details>
+
+<details>
+<summary><b>2. UART: UART driver</b></summary>
+
+- Register-level. `configure()` computes the baud rate dividers from the
+  requested settings.
+- Get polled transmit and receive working first so your team can test
+  between boards early. Then move receive to the interrupt.
+- On receive, the RX interrupt copies each byte into a circular buffer, and
+  `receive_cursor()` returns where the next byte will go. See its docs in
+  `serial.hpp`.
+- Make the buffer larger than one packet. A full lap around the buffer looks
+  like zero new bytes. 256 bytes is a safe size.
+- The handler is `extern "C" void UARTn_IRQHandler()` for your instance
+  (`UART0` through `UART3`).
+- Test alone by wiring TX to RX on one board.
+
+</details>
+
+<details>
+<summary><b>3. CRC: CRC driver, benchmark, <code>transmit_task</code></b></summary>
+
+**Driver**
+
+- Register-level, against the on-chip CRC accelerator.
+- Output must match `crc32_software` (standard CRC-32, as used by zlib).
+  Check the accelerator's bit-order options and whether it applies the final
+  XOR.
+
+**`transmit_task`**
+
+1. Block in `xQueueReceive(batch_queue, &samples, portMAX_DELAY)`.
+2. Compute the CRC over the samples with `crc32_hardware` and
+   `crc32_software`, timing each with `lab2::steady_clock`. Print both
+   durations.
+3. Read the corruption button. If it's held, flip one bit in the samples.
+4. Write the samples, then the CRC.
+
+</details>
+
+<details>
+<summary><b>4. Application: <code>request_task</code>, <code>display_task</code>, semaphore, queue, <code>main()</code></b></summary>
+
+**Setup in `main()`**
+
+- Include `semphr.h` and `queue.h`.
+- Before `vTaskStartScheduler()`, create `sample_request` with
+  `xSemaphoreCreateBinaryStatic()`, `batch_queue` with
+  `xQueueCreateStatic()` (a `StaticQueue_t` plus storage for one
+  `std::array<temperature_sample_t, 64>`), and the three sensor tasks with
+  `xTaskCreateStatic()`, each with its own stack and TCB.
+- The serial driver is shared: `request_task` only reads from it, and
+  `transmit_task` only writes to it.
+
+**`request_task`**
+
+- Every few ms (`vTaskDelay()`), compare `receive_cursor()` with the last
+  position you read. When `sample_request_command` arrives, call
+  `xSemaphoreGive(sample_request)`.
+
+**`display_task`**
+
+1. On S1 or S2, save the current `receive_cursor()`, then send
+   `sample_request_command`.
+2. Wait until the full packet (64 samples plus the 4-byte CRC) has arrived
+   after the saved position. If it takes more than 500 ms, print a timeout
+   message.
+3. Recompute the CRC over the samples and compare it to the one received.
+   On a mismatch, print a message and set the LED magenta. Otherwise,
+   average the samples and set the LED color.
+
+</details>
+
+Teams of 5 split role 4: one person takes `request_task`, the semaphore, and
+the queue, and the other takes `display_task`.
+
+Until a teammate's part works, use a stand-in behind the same interface: an
+`adc16_stream` that returns a ramp (each sample one higher than the last),
+`crc32_software` for the CRC, or a `serial` that prints whatever it's asked
+to write.
+
+**Goal for the end of week 1:** `crc32_hardware` matches `crc32_software`,
+and the two boards can exchange bytes over UART.
 
 ## Hardware
 
-Board: [LP-MSPM0G3507 LaunchPad](https://www.ti.com/tool/LP-MSPM0G3507). You
-will need two boards, one per role. Which UART instance/pins you use is up
-to you - check the datasheet's pin-to-peripheral function table for which
-pins carry UART signals, and cross-connect the two boards' TX/RX lines (and
-grounds). The display board also needs the on-board RGB LED and S1/S2, and
-the sensor board needs one of S1/S2 (your choice which) for the corrupted-
-data demonstration - see
-[lab1_gpio/README.md](../lab1_gpio/README.md#hardware) for that wiring.
+Two [LP-MSPM0G3507 LaunchPads](https://www.ti.com/tool/LP-MSPM0G3507), one
+per role. Pick any UART instance, cross-connect TX/RX between the boards,
+and connect their grounds. See [lab1](../lab1_gpio/README.md#hardware) for
+the RGB LED and S1/S2 pins. The temperature sensor is inside the chip and
+needs no wiring.
 
-The internal temperature sensor requires no external wiring - it's an ADC
-input channel built into the chip. Which channel it's mapped to, how to
-enable it, and where its factory calibration constants live are all in the
-MSPM0G350x Technical Reference Manual and datasheet; finding that is part
-of the assignment.
+## Grading Rubric (120 pt)
 
-## Grading Rubric (100 pt)
-
-1. **ADC + DMA - 15 pts.** `adc_driver` correctly implements the
-   `adc16_stream` interface register-level with DMA, filling the whole given
-   buffer in a single transfer and putting its calling task to sleep until
-   the DMA transfer-complete interrupt wakes it.
-2. **UART + DMA - 15 pts.** Serial driver transmits data at the configured
-   baud rate, and its receive side is a circular buffer that works with its
-   own independent DMA transfer.
-3. **CRC driver - 15 pts.** `crc32_hardware` produces a CRC that matches the
-   supplied `crc32_software` reference implementation, and is measurably
-   faster.
-4. **ADC-to-temperature conversion - 10 pts.** Raw ADC samples are
-   correctly converted to temperature values that resolve at least 0.5 degC.
-5. **Sensor role - 10 pts.** On receiving the request byte, the sensor
-   board samples, converts, and transmits a 64-value batch with a valid CRC
-   appended.
-6. **Display role - 10 pts.** Pressing S1 or S2 requests a batch and, once
-   a valid batch arrives, sets the RGB LED color based on the readings.
-   Invalid CRCs are dropped with a printed message and the LED turns
-   magenta instead of updating with a color derived from the readings.
-7. **FreeRTOS application - 10 pts.** Each board runs the correct role's
-   task, selected via the `if constexpr` in `main()`.
-8. **Corrupted data demonstration - 5 pts.** Holding S1 or S2 (your choice)
-   on the sensor board while it transmits flips one bit in the outgoing
-   packet, and the display board correctly detects and reports the
-   resulting CRC mismatch.
-9. **Code submission - 10 pts.** Submit a PR to your git repo targeting your
-   `main` branch.
+1. **ADC + DMA - 15 pts.** `adc_driver` fills the whole buffer in one DMA
+   transfer and sleeps the calling task until the DMA-done interrupt wakes
+   it.
+2. **UART - 15 pts.** Transmits at the configured baud rate and receives
+   into an interrupt-driven circular buffer.
+3. **CRC driver - 15 pts.** `crc32_hardware` matches `crc32_software` and is
+   measurably faster.
+4. **Temperature conversion - 15 pts.** Samples convert to temperatures
+   with at least 0.5 degC resolution.
+5. **Sensor role - 15 pts.** Answers each request with 64 samples and a
+   valid CRC.
+6. **Display role - 15 pts.** S1/S2 requests a batch and the LED shows the
+   temperature. Bad CRCs turn the LED magenta, and both bad CRCs and
+   timeouts print a message.
+7. **Sensor task architecture - 15 pts.** Three statically allocated tasks,
+   the `sample_request` semaphore, and `batch_queue`, as described above.
+8. **Corrupted data demonstration - 5 pts.** Holding the sensor board's
+   button flips a bit, and the display board catches it.
+9. **Code submission - 10 pts.** A PR to your repo's `main` branch, with
+   role owners listed in the description.
 
 ## Reference material
 
-- **[MSPM0G3507 datasheet](https://www.ti.com/lit/ds/symlink/mspm0g3507.pdf)** -
-  pin-to-peripheral function table for UART pins, and internal temperature
-  sensor electrical characteristics.
-- **[MSPM0G350x Technical Reference Manual](https://www.ti.com/lit/ug/slau846e/slau846e.pdf)** -
-  ADC12, DMA, UART, CRC accelerator chapters, and the internal temperature
-  sensor's calibration constants.
+- [MSPM0G3507 datasheet](https://www.ti.com/lit/ds/symlink/mspm0g3507.pdf):
+  UART pin table and temperature sensor specs (section 7.14).
+- [MSPM0G350x Technical Reference Manual](https://www.ti.com/lit/ug/slau846e/slau846e.pdf):
+  ADC, DMA, UART, and CRC chapters.
+- MSPM0 SDK examples: `adc12_14bit_resolution` and
+  `adc12_internal_temp_sensor_mathacl`.
+
+<!-- cspell:ignore mathacl SYSOSC VDDA IIDX semphr -->

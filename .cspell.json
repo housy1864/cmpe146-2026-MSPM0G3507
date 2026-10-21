@@ -70,6 +70,7 @@
         "microcontrollers",
         "offsetof",
         "uintptr",
-        "CPHA"
+        "CPHA",
+        "BUSCLK",
     ]
 }

@@ -1,8 +1,15 @@
+// cspell:ignore VDDA IIDX DDEVICE
+
+#include <array>
 #include <cstdint>
 #include <cstdio>
 
 #include "FreeRTOS.h"
+#include "queue.h"
+#include "semphr.h"
 #include "task.h"
+
+#include <ti/driverlib/driverlib.h>
 
 #include "../hal/adc.hpp"
 #include "../hal/crc.hpp"
@@ -10,36 +17,55 @@
 #include "../hal/serial.hpp"
 #include "../hal/timer.hpp"
 
-// TODO(lab, step 1): Make this class inherit from and implement the
-// `lab5::adc16_stream` interface (`adc.hpp`), wired to the on-board internal
-// temperature sensor channel, written register-level - no DriverLib. Check
-// the MSPM0G350x Technical Reference Manual and datasheet for how to enable
-// and select that channel, and how to read back the factory calibration
-// constants used to convert a raw sample into a temperature. read() must
-// configure a single DMA transfer that fills the entire given buffer with
-// consecutive conversions, put the calling FreeRTOS task to sleep (e.g.
-// block on a semaphore or task notification) for the duration of that
-// transfer, and let the DMA transfer-complete interrupt wake it once the
-// buffer is full - one sleep per buffer, not one per sample.
+// =============================================================================
+// Role 1: ADC
+// =============================================================================
+
+// TODO(lab, role 1): Make this class inherit from and implement the
+// `lab5::adc16_stream` interface (`adc.hpp`) using DriverLib, wired to the
+// internal temperature sensor (ADC0 channel 11). Follow the "1. ADC" guide in
+// the README:
+//   - Constructor: power up ADC0, configure MEM0 for channel 11 against VDDA,
+//     set the sample time, and set up the ADC's DMA trigger and DMA channel.
+//   - driver_read(): re-arm the DMA for the given buffer, save the calling
+//     task's handle, start the conversion, then sleep with ulTaskNotifyTake()
+//     until ADC0_IRQHandler() wakes you. Upscale each 12-bit sample to 16 bits
+//     before returning.
 class adc_driver
 {};
 
-// TODO(lab, step 2): Make this class inherit from and implement the
+// TODO(lab, role 1): Store the handle of the task waiting in
+// adc_driver::driver_read() somewhere this handler can reach. When
+// DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
+// task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
+extern "C" void ADC0_IRQHandler()
+{}
+
+// =============================================================================
+// Role 2: UART
+// =============================================================================
+
+// TODO(lab, role 2): Make this class inherit from and implement the
 // `lab6::serial` interface (`serial.hpp`), written register-level - no
-// DriverLib. driver_receive_buffer()/driver_receive_cursor() must be backed
-// by a circular buffer that a second, independent DMA transfer fills
-// continuously in the background - this is a separate DMA channel from the
-// one the ADC driver uses on the sensor board. See
-// `lab6::serial::receive_cursor()`'s docs for how a caller is expected to
-// consume it.
+// DriverLib. driver_configure() computes the baud rate dividers from the
+// requested settings. Reception fills a circular buffer from the UART's RX
+// interrupt; driver_receive_cursor() returns where the next byte will be
+// written. Make the buffer larger than one packet (256 bytes is safe).
+//
+// Add the matching `extern "C" void UARTn_IRQHandler()` for the UART instance
+// you pick (UART0 through UART3).
 class serial_driver
 {};
 
-// TODO(lab, step 3): Make this class inherit from and implement the
+// =============================================================================
+// Role 3: CRC
+// =============================================================================
+
+// TODO(lab, role 3): Make this class inherit from and implement the
 // `lab6::crc32` interface (`crc.hpp`), written register-level against the
-// on-chip CRC accelerator peripheral - no DriverLib. This is the
-// hardware-accelerated implementation you'll benchmark against the
-// `crc32_software` reference supplied below.
+// on-chip CRC accelerator - no DriverLib. Its output must match
+// crc32_software below for the same input. Check the accelerator's bit-order
+// options and whether it applies the final XOR.
 class crc32_hardware
 {};
 
@@ -78,84 +104,124 @@ private:
 };
 
 namespace {
+// =============================================================================
+// Shared between both boards
+// =============================================================================
+
 // The one-byte message the display board sends to ask the sensor board for
-// a fresh batch of readings. Its value doesn't matter - it just needs to be
-// a single recognizable byte the sensor board is watching for.
+// a fresh batch of readings.
 constexpr std::uint8_t sample_request_command = 0xA5;
 
 constexpr std::size_t samples_per_batch = 64;
 
-// TODO(lab, decide): Pick an encoding for a single temperature sample that
-// can resolve at least 0.5 degC steps - a plain integer count of whole
-// degrees cannot. A fixed-point scheme (e.g. int16_t in units of 0.1 degC)
-// or a float both work. Whatever you choose, both boards must agree on it,
-// since the sensor board encodes 64 of these and the display board decodes
-// them back out.
+// TODO(lab, team): Agree on an encoding for a single temperature sample that
+// resolves at least 0.5 degC. A fixed-point scheme (e.g. int16_t in units of
+// 0.1 degC) or a float both work. Both boards must use the same encoding and
+// byte order.
 using temperature_sample_t = std::int16_t;
 
-void sensor_task(void*)
+// One batch of converted samples. This is the item type of batch_queue.
+using temperature_batch = std::array<temperature_sample_t, samples_per_batch>;
+
+// A packet on the wire: the batch's bytes, followed by the 4-byte CRC-32.
+constexpr std::size_t packet_size =
+  sizeof(temperature_batch) + sizeof(std::uint32_t);
+
+// =============================================================================
+// Sensor board: semaphore and queue (role 4 creates these in main())
+// =============================================================================
+
+// request_task -> sampler_task: "take a batch now". Carries no data.
+// TODO(lab, role 4): Create with xSemaphoreCreateBinaryStatic().
+SemaphoreHandle_t sample_request = nullptr;
+
+// sampler_task -> transmit_task: a copy of one temperature_batch.
+// TODO(lab, role 4): Create with xQueueCreateStatic(), depth 1, item size
+// sizeof(temperature_batch).
+QueueHandle_t batch_queue = nullptr;
+
+// =============================================================================
+// Sensor board: tasks
+// =============================================================================
+
+// TODO(lab, role 4): Every few ms (vTaskDelay()), compare the serial driver's
+// receive_cursor() with the last position you read. When
+// sample_request_command arrives, xSemaphoreGive(sample_request). This task
+// only reads from the serial driver.
+void request_task(void*)
 {
-  // TODO(lab, sensor role): Construct an adc_driver, a serial_driver, a
-  // crc32_hardware (crc32_software above needs no setup - it's ready to use
-  // as-is), and a lab1::input_pin for S1 or S2 (your choice) - this button
-  // is only used for step 5 below, doesn't need an interrupt, a plain level
-  // read is enough. Loop forever:
-  //   1. Block waiting to receive sample_request_command from the display
-  //      board (poll serial_driver's receive_cursor()/receive_buffer()).
-  //   2. Fill a `std::array<std::uint16_t, samples_per_batch>` buffer with
-  //      one call to adc_driver::read() (one DMA transfer, one task sleep).
-  //   3. Convert each raw sample to a temperature_sample_t. This is the
-  //      conversion you write yourself - see the MSPM0G350x Technical
-  //      Reference Manual's ADC and temperature sensor sections for the
-  //      calibration constants and formula, and don't forget your ADC's
-  //      actual reference voltage matters here.
-  //   4. Compute a CRC-32 over the resulting
-  //      `std::array<temperature_sample_t, samples_per_batch>` with both
-  //      crc32_hardware and the supplied crc32_software - time each with a
-  //      lab2::steady_clock and print both durations (crc32_hardware should
-  //      win).
-  //   5. Read your corruption-test button. If it's currently held down,
-  //      flip one bit anywhere in the sample buffer (after computing the
-  //      CRC in step 4, so the CRC no longer matches the corrupted data).
-  //   6. Transmit the 64 samples with the CRC appended over UART.
   while (true) {
   }
 }
 
+// TODO(lab, role 1): Construct an adc_driver. Loop forever:
+//   1. xSemaphoreTake(sample_request, portMAX_DELAY)
+//   2. Fill a std::array<std::uint16_t, samples_per_batch> with one call to
+//      adc_driver::read() (one DMA transfer, one task sleep).
+//   3. Convert each raw sample into a temperature_batch. See "Temperature
+//      conversion" in the README for the calibration constants.
+//   4. xQueueSend(batch_queue, &batch, portMAX_DELAY)
+void sampler_task(void*)
+{
+  while (true) {
+  }
+}
+
+// TODO(lab, role 3): Construct a crc32_hardware and a lab1::input_pin for
+// your corruption-test button (S1 or S2). Loop forever:
+//   1. xQueueReceive(batch_queue, &batch, portMAX_DELAY)
+//   2. Compute the CRC-32 over the batch's bytes with both crc32_hardware and
+//      crc32_software, timing each with a lab2::steady_clock. Print both
+//      durations.
+//   3. If the button is held, flip one bit in the batch (after the CRC, so
+//      the CRC no longer matches).
+//   4. Write the batch, then the CRC, with the serial driver. This task only
+//      writes to the serial driver.
+void transmit_task(void*)
+{
+  while (true) {
+  }
+}
+
+// =============================================================================
+// Display board: task
+// =============================================================================
+
+// TODO(lab, role 4): Construct a serial_driver, a crc32_hardware, two
+// lab1::input_pin (S1 and S2), and three lab1::output_pin (the RGB LED).
+// Loop forever:
+//   1. Wait for S1 or S2 to be pressed.
+//   2. Save the current receive_cursor(), then write sample_request_command.
+//   3. Wait until packet_size bytes have arrived after the saved position. If
+//      they don't arrive within 500 ms, print a timeout message and go back
+//      to step 1.
+//   4. Recompute the CRC over the received batch and compare it to the
+//      received CRC. On a mismatch, print a message and set the LED magenta
+//      (red + blue).
+//   5. Otherwise, average the batch and set the LED: blue for cold, yellow
+//      for warm, red for hot. You pick the bands.
 void display_task(void*)
 {
-  // TODO(lab, display role): Construct a serial_driver, a crc32_hardware,
-  // two lab1::input_pin (S1 and S2), and three lab1::output_pin (the RGB
-  // LED). Loop forever:
-  //   1. Wait for either S1 or S2 to be pressed (edge-triggered interrupt
-  //      or polled, your choice).
-  //   2. Transmit sample_request_command to the sensor board.
-  //   3. Block waiting to receive 64 temperature_sample_t values plus a
-  //      trailing CRC-32 from the sensor board.
-  //   4. Recompute the CRC-32 over the received samples with your
-  //      crc32_hardware and compare it to the one that arrived. If it
-  //      doesn't match, drop the packet, print an appropriate message, and
-  //      set the RGB LED to magenta (red + blue) instead of a
-  //      temperature-derived color - this is the CRC check visibly failing,
-  //      not just logging it.
-  //   5. Otherwise, turn the 64 samples into a single representative
-  //      reading (e.g. average them) and set the RGB LED's color based on
-  //      it: blue for cold, yellow for warm, red for hot. Where exactly
-  //      those bands fall is your call.
   while (true) {
   }
 }
 
-// Resize task_stack_words if necessary, if crashes are detected, that may be
-// due to stack overflows.
-constexpr std::uint32_t task_stack_words = 512;
-StaticTask_t device_task_tcb;
-StackType_t device_task_stack[task_stack_words];
+// =============================================================================
+// Task storage
+// =============================================================================
 
-// This lab uses two boards playing different roles: a "sensor" board with
-// the internal temperature sensor wired to its ADC, and a "display" board
-// with the RGB LED and S1/S2 buttons. Both roles live in this one file -
-// `this_device` below picks which set of tasks main() creates.
+// Resize task_stack_words if necessary. Crashes can be caused by stack
+// overflows.
+constexpr std::uint32_t task_stack_words = 512;
+
+// Display board: one task.
+StaticTask_t display_task_tcb;
+StackType_t display_task_stack[task_stack_words];
+
+// TODO(lab, role 4): Add a stack and TCB for each of the three sensor tasks.
+
+// This lab uses two boards playing different roles. Both roles live in this
+// one file, and `this_device` below picks which tasks main() creates.
 //
 // For this lab, flip this by hand and rebuild before flashing each board.
 // A more automated setup (e.g. a CI job that builds and flashes both roles
@@ -178,21 +244,20 @@ int main()
   std::printf("Hello, World\n");
 
   if constexpr (this_device == device_role::sensor) {
-    xTaskCreateStatic(sensor_task,
-                      "sensor_task",
-                      task_stack_words,
-                      nullptr,
-                      tskIDLE_PRIORITY + 1,
-                      device_task_stack,
-                      &device_task_tcb);
+    // TODO(lab, role 4): Before the scheduler starts:
+    //   1. Create sample_request and batch_queue.
+    //   2. Create request_task, sampler_task, and transmit_task with
+    //      xTaskCreateStatic().
+    // request_task and transmit_task share one serial_driver. main()'s stack
+    // is reused once the scheduler starts, so don't make it a local here.
   } else {
     xTaskCreateStatic(display_task,
                       "display_task",
                       task_stack_words,
                       nullptr,
                       tskIDLE_PRIORITY + 1,
-                      device_task_stack,
-                      &device_task_tcb);
+                      display_task_stack,
+                      &display_task_tcb);
   }
 
   vTaskStartScheduler();
