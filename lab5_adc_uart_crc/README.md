@@ -262,26 +262,47 @@ needs no wiring.
 
 ## Grading Rubric (120 pt)
 
-1. **ADC + DMA - 15 pts.** `adc_driver` fills the whole buffer in one DMA
-   transfer and sleeps the calling task until the DMA-done interrupt wakes
-   it.
-2. **UART - 15 pts.** Transmits at the configured baud rate and receives
-   into an interrupt-driven circular buffer.
-3. **CRC driver - 15 pts.** `crc32_hardware` matches `crc32_software` and is
-   measurably faster.
-4. **Temperature conversion - 15 pts.** Samples convert to temperatures
-   with at least 0.5 degC resolution.
-5. **Sensor role - 15 pts.** Answers each request with 64 samples and a
-   valid CRC.
-6. **Display role - 15 pts.** S1/S2 requests a batch and the LED shows the
-   temperature. Bad CRCs turn the LED magenta, and both bad CRCs and
-   timeouts print a message.
-7. **Sensor task architecture - 15 pts.** Three statically allocated tasks,
-   the `sample_request` semaphore, and `batch_queue`, as described above.
-8. **Corrupted data demonstration - 5 pts.** Holding the sensor board's
-   button flips a bit, and the display board catches it.
-9. **Code submission - 10 pts.** A PR to your repo's `main` branch, with
-   role owners listed in the description.
+The whole team shares one grade. Roles decide who answers which questions at
+check-off, not who earns which points.
+
+### Role 1: ADC (25 pts)
+
+- **ADC + DMA - 15 pts.** `adc_driver` fills the whole buffer in one DMA
+  transfer and sleeps the calling task until the DMA-done interrupt wakes it.
+- **Temperature conversion - 10 pts.** Samples convert to temperatures with
+  at least 0.5 degC resolution.
+
+### Role 2: UART (25 pts)
+
+- **UART transmit - 10 pts.** Transmits at the configured baud rate.
+- **UART receive - 15 pts.** Receives into an interrupt-driven circular
+  buffer, and `receive_cursor()` behaves as `serial.hpp` describes.
+
+### Role 3: CRC (20 pts)
+
+- **CRC driver - 15 pts.** `crc32_hardware` matches `crc32_software` and is
+  measurably faster.
+- **Corrupted data demonstration - 5 pts.** Holding the sensor board's
+  button flips a bit, and the display board catches it.
+
+### Role 4: Application (25 pts)
+
+- **Display role - 15 pts.** S1/S2 requests a batch and the LED shows the
+  temperature. Bad CRCs turn the LED magenta, and both bad CRCs and timeouts
+  print a message.
+- **Sensor task architecture - 10 pts.** Three statically allocated tasks,
+  the `sample_request` semaphore, and `batch_queue`, as described above.
+
+### Whole team (25 pts)
+
+- **End-to-end exchange demo - 15 pts.** Everything working together:
+  pressing S1/S2 on the display board gets a fresh batch from the sensor
+  board every time, across repeated presses, without resetting either board.
+- **Code submission - 10 pts.** A PR to your repo's `main` branch, with role
+  owners listed in the description.
+
+Teams of 5 split role 4's points along with its work: display role to one
+person, task architecture to the other.
 
 ## Reference material
 
