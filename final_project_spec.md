@@ -1,7 +1,5 @@
 # CMPE 146 Final Project Spec
 
-Oct 27, 2026 · @Khalil
-
 ## Overview
 
 Build an interactive embedded system of your team's choosing on the MSPM0G3507 or MSP432 LaunchPad. Requirements are deliberately light; what matters is that the project works reliably and every member owns a part of it.
