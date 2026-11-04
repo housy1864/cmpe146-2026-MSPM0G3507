@@ -116,14 +116,14 @@ public:
     // 1. SPI signaling
     IOMUX->SECCFG.PINCM[26] =
         IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM26_PF_SPI1_SCLK; 
-    // Assigns SPI Clock to pin 26.
+    // Assigns SPI Clock to pin PB9.
     IOMUX->SECCFG.PINCM[25] =
         IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM25_PF_SPI1_PICO; 
-    // Assigns peripheral in(SPI input)/controller out to pin 25, is for the output. PICO
+    // Assigns peripheral in(SPI input)/controller out to pin PB8, is for the output. PICO
     IOMUX->SECCFG.PINCM[24] = IOMUX_PINCM_PC_CONNECTED |
                               IOMUX_PINCM_INENA_ENABLE |
                               IOMUX_PINCM24_PF_SPI1_POCI; 
-    // Assigns SPI output peripheral out(SPI output)/controller in to pin 24. POCI
+    // Assigns SPI output peripheral out(SPI output)/controller in to pin PB9. POCI
 
     configure({});
   }
@@ -249,7 +249,13 @@ public:
     const std::array<std::uint8_t, 4> command = {
       w25q_read_jedec_id, 0xFF, 0xFF, 0xFF}; // 0xFF is a default value.
     std::array<std::uint8_t, 4> response{};
-    transfer(command, response);
+  transfer(command, response);
+
+    std::printf("JEDEC TX: %02X %02X %02X %02X\n",
+            command[0], command[1], command[2], command[3]);
+
+    std::printf("JEDEC RX: %02X %02X %02X %02X\n",
+            response[0], response[1], response[2], response[3]);
     return {response[1], response[2], response[3]}; // This represents the 3 byte JEDEC ID.
   }
   // 2. Reads and prints the memory capacity
@@ -274,9 +280,9 @@ public:
     // 3 bytes for an address. Also read as 24 bits.
     // 3. Block Read
     command[0] = w25q_read_data;
-    command[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address byte
+    command[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte
     command[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte
-    command[3] = static_cast<std::uint8_t>(first_block_address);        // Dummy Byte
+    command[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte
     transfer(std::span<std::uint8_t const>(command.data(), 4 + count),
              std::span<std::uint8_t>(response.data(), 4 + count)); // Microcontroller requests data from SPI, SPI 
                                                                   // responds to microcontroller command read with data response.
@@ -310,9 +316,9 @@ public:
     // 4. Block Write
     std::array<std::uint8_t, 4 + block_size> program{};
     program[0] = w25q_page_program; // Starts at a 24 bit address
-    program[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte
-    program[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte
-    program[3] = static_cast<std::uint8_t>(first_block_address);        // Dummy Byte
+    program[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte 1
+    program[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 2
+    program[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte 3
     std::memcpy(program.data() + 4, p_data.data(), count);// Start from page program, copies 
                                                           // bytes from microcontroller to flash chip
     command(std::span<std::uint8_t const>(program.data(), 4 + count));
@@ -401,7 +407,7 @@ int main()
   std::array<std::uint8_t, block_size> block{};
   flash.read_block(block);
 
-  std::printf("JEDEC manufacturer ID: 0x%02X\n", id[0]);
+  std::printf("JEDEC manufacturer ID: 0x%02X\n", id[0]); // Step 2
   std::printf("JEDEC type: 0x%02X, density code: 0x%02X\n", id[1], id[2]);
   std::printf("Flash capacity: %lu bytes (%lu KiB)\n",
               static_cast<unsigned long>(capacity),
