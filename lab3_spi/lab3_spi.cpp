@@ -98,16 +98,17 @@ public:
   mspm0g_spi()
   {
     GPIOB->GPRCM.PWREN = GPIO_PWREN_KEY_UNLOCK_W | GPIO_PWREN_ENABLE_ENABLE; // GPIOB enabled
+    // Reset SPI1 before enabling its peripheral power. This is the order
+    // used by the MSPM0 SPI initialization sequence.
+    SPI1->GPRCM.RSTCTL = SPI_RSTCTL_KEY_UNLOCK_W |
+                         SPI_RSTCTL_RESETSTKYCLR_CLR |
+                         SPI_RSTCTL_RESETASSERT_ASSERT;
     SPI1->GPRCM.PWREN = SPI_PWREN_KEY_UNLOCK_W | SPI_PWREN_ENABLE_ENABLE; // Enables power to peripheral
     for (volatile std::uint32_t i = 0;
          i < peripheral_power_wait_cycles;
          ++i) {
       (void)SPI1->GPRCM.PWREN;
     }
-   // Reset control for internal SPI module
-    SPI1->GPRCM.RSTCTL = SPI_RSTCTL_KEY_UNLOCK_W |
-                         SPI_RSTCTL_RESETSTKYCLR_CLR |
-                         SPI_RSTCTL_RESETASSERT_ASSERT;
 
     /*
       Sets up SPI with pins so it can be used. Does not have its own dedicated pins, so
@@ -187,6 +188,7 @@ private:
     */
     while ((SPI1->STAT & SPI_STAT_RFE_MASK) != SPI_STAT_RFE_EMPTY) {
       if (timeout-- == 0) {
+        std::printf("SPI timeout: RX FIFO did not empty\n");
         return;
       }
       (void)SPI1->RXDATA;
@@ -204,6 +206,7 @@ private:
       timeout = spi_poll_timeout; // Used to avoid timeout
       while ((SPI1->STAT & SPI_STAT_TNF_MASK) == SPI_STAT_TNF_FULL) {
         if (timeout-- == 0) {
+          std::printf("SPI timeout: TX FIFO remained full\n");
           return;
         }
       }
@@ -211,6 +214,8 @@ private:
       timeout = spi_poll_timeout;
       while ((SPI1->STAT & SPI_STAT_RFE_MASK) == SPI_STAT_RFE_EMPTY) {
         if (timeout-- == 0) {
+          std::printf("SPI timeout: RX FIFO remained empty after TX 0x%02X\n",
+                      tx);
           return;
         }
       }
@@ -249,7 +254,7 @@ public:
     const std::array<std::uint8_t, 4> command = {
       w25q_read_jedec_id, 0xFF, 0xFF, 0xFF}; // 0xFF is a default value.
     std::array<std::uint8_t, 4> response{};
-  transfer(command, response);
+    transfer(command, response);
 
     std::printf("JEDEC TX: %02X %02X %02X %02X\n",
             command[0], command[1], command[2], command[3]);
@@ -401,6 +406,19 @@ int main()
 
   spi.configure({.clock_rate = 500'000, .bus_mode = lab3::spi::mode::m0});
   std::printf("SPI configured\n");
+  std::printf("--- SPI register diagnostics ---\n");
+  std::printf("SPI PWREN: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->GPRCM.PWREN));
+  std::printf("SPI RSTSTAT: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->GPRCM.STAT));
+  std::printf("SPI CTL0: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->CTL0));
+  std::printf("SPI CTL1: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->CTL1));
+  std::printf("SPI CLKSEL: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->CLKSEL));
+  std::printf("SPI STAT: 0x%08lX\n",
+              static_cast<unsigned long>(SPI1->STAT));
   const auto id = flash.read_jedec_id(); // Used to print the manufacturer's ID.
   std::printf("Touched\n");
   const std::uint32_t capacity = flash.capacity_bytes(); // Used to print size of flash chip.
