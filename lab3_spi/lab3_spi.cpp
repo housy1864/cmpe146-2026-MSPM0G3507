@@ -259,10 +259,10 @@ private:
     mspm0g::mmio(mspm0g::spi1_clkdiv) = 0;
     mspm0g::mmio(mspm0g::spi1_ctl0) =
         mspm0g::spi_ctl0_dss_8 | frame_format;
-    mspm0g::mmio(mspm0g::spi1_ctl1) =
+    mspm0g::mmio(mspm0g::spi1_ctl1) = //allows us to modify it and use the MSB bit first
         mspm0g::spi_ctl1_controller | mspm0g::spi_ctl1_msb_first;
 
-    // fSCLK = fBUSCLK / (2 * (SCR + 1)). Round down so the requested
+    // fSCLK = fBUSCLK / (2 * (SCR + 1)). Chapter 26 SPI clock control 26.2.2.4 Clock Generation
     // maximum clock rate is never exceeded.
     std::uint32_t divider = bus_clock_hz / (2u * p_settings.clock_rate);
     if (divider == 0) {
@@ -271,7 +271,7 @@ private:
     --divider;
     if (divider > 1023u) {
       divider = 1023u;
-    }
+    } // P1469 - SCR is a value from 0-1023
     mspm0g::mmio(mspm0g::spi1_clkctl) =
         divider & mspm0g::spi_clkctl_scr_mask;
     mspm0g::mmio(mspm0g::spi1_ctl1) |= mspm0g::spi_ctl1_enable;
