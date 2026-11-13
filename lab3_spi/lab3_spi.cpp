@@ -12,76 +12,80 @@ namespace {
 // These values replace the device-header register definitions.
 namespace mspm0g {
 
-// IOMUX peripheral base address.
+// IOMUX base address. PINCM entries used for pin multiplexing begin here;
+// each entry occupies one 32-bit register (4 bytes).
 constexpr std::uintptr_t iomux_base = 0x4042'8000u;
-// GPIOB peripheral base address.
+// GPIOB base address. This GPIO port carries the SPI1 pins and chip select.
 constexpr std::uintptr_t gpiob_base = 0x400A'2000u;
-// SPI1 peripheral base address.
+// SPI1 base address. This is the SPI controller's register block.
 constexpr std::uintptr_t spi1_base = 0x4046'A000u;
 
-// GPIOB power enable register.
+// GPIOB + 0x0800: power-enable register; enables the GPIOB peripheral.
 constexpr std::uintptr_t gpiob_pwren = gpiob_base + 0x0800u;
-// GPIOB reset control register.
+// GPIOB + 0x0804: reset-control register; clears/asserts GPIOB reset.
 constexpr std::uintptr_t gpiob_rstctl = gpiob_base + 0x0804u;
-// GPIOB output data register.
+// GPIOB + 0x1280: output-data register; reads the current PB output levels.
 constexpr std::uintptr_t gpiob_dout = gpiob_base + 0x1280u;
-// GPIOB output set register.
+// GPIOB + 0x1290: output-set register; writing 1 drives a PB pin high.
 constexpr std::uintptr_t gpiob_doutset = gpiob_base + 0x1290u;
-// GPIOB output clear register.
+// GPIOB + 0x12A0: output-clear register; writing 1 drives a PB pin low.
 constexpr std::uintptr_t gpiob_doutclr = gpiob_base + 0x12A0u;
-// GPIOB output enable register.
+// GPIOB + 0x12D0: output-enable set register; writing 1 enables PB output.
 constexpr std::uintptr_t gpiob_doeset = gpiob_base + 0x12D0u;
 
-// SPI1 power enable register.
+// SPI1 + 0x0800: power-enable register; enables SPI1.
 constexpr std::uintptr_t spi1_pwren = spi1_base + 0x0800u;
-// SPI1 reset control register.
+// SPI1 + 0x0804: reset-control register; clears/asserts SPI1 reset.
 constexpr std::uintptr_t spi1_rstctl = spi1_base + 0x0804u;
-// SPI1 reset status register.
+// SPI1 + 0x0814: reset/status register; reports SPI1 reset state.
 constexpr std::uintptr_t spi1_gprcm_stat = spi1_base + 0x0814u;
-// SPI1 clock divider register.
+// SPI1 + 0x1000: peripheral clock-divider register.
 constexpr std::uintptr_t spi1_clkdiv = spi1_base + 0x1000u;
-// SPI1 clock source register.
+// SPI1 + 0x1004: clock-source selector; this program selects SYSCLK.
 constexpr std::uintptr_t spi1_clksel = spi1_base + 0x1004u;
-// SPI1 control register zero.
+// SPI1 + 0x1100: control 0; selects frame size, polarity, phase, and format.
 constexpr std::uintptr_t spi1_ctl0 = spi1_base + 0x1100u;
-// SPI1 control register one.
+// SPI1 + 0x1104: control 1; enables SPI1 and selects controller/MSB operation.
 constexpr std::uintptr_t spi1_ctl1 = spi1_base + 0x1104u;
-// SPI1 clock control register.
+// SPI1 + 0x1108: serial-clock control; SCR sets the SCLK divider.
 constexpr std::uintptr_t spi1_clkctl = spi1_base + 0x1108u;
-// SPI1 status register.
+// SPI1 + 0x1110: status register; reports TX/RX FIFO state.
 constexpr std::uintptr_t spi1_stat = spi1_base + 0x1110u;
-// SPI1 receive data register.
+// SPI1 + 0x1130: receive-data register; reading removes one RX FIFO byte.
 constexpr std::uintptr_t spi1_rxdata = spi1_base + 0x1130u;
-// SPI1 transmit data register.
+// SPI1 + 0x1140: transmit-data register; writing queues one TX FIFO byte.
 constexpr std::uintptr_t spi1_txdata = spi1_base + 0x1140u;
 
-constexpr std::uint32_t power_key = 0x2600'0000u;
-constexpr std::uint32_t power_enable = 0x0000'0001u;
-constexpr std::uint32_t reset_key = 0xB100'0000u;
-constexpr std::uint32_t reset_sticky_clear = 0x0000'0002u;
-constexpr std::uint32_t reset_assert = 0x0000'0001u;
+// Power/reset key and control values written to the GPRCM registers.
+constexpr std::uint32_t power_key = 0x2600'0000u;       // Unlock power writes.
+constexpr std::uint32_t power_enable = 0x0000'0001u;    // Enable peripheral power.
+constexpr std::uint32_t reset_key = 0xB100'0000u;       // Unlock reset writes.
+constexpr std::uint32_t reset_sticky_clear = 0x0000'0002u; // Clear latched reset.
+constexpr std::uint32_t reset_assert = 0x0000'0001u;    // Assert peripheral reset.
 
-constexpr std::uint32_t iomux_connected = 0x0000'0080u;
-constexpr std::uint32_t iomux_input_enable = 0x0004'0000u;
-constexpr std::uint32_t iomux_pf_gpio_b17 = 0x0000'0001u;
-constexpr std::uint32_t iomux_pf_spi1_poci = 0x0000'0003u;
-constexpr std::uint32_t iomux_pf_spi1_pico = 0x0000'0003u;
-constexpr std::uint32_t iomux_pf_spi1_sclk = 0x0000'0003u;
+// IOMUX pin-control values. PF selects the peripheral function for each pin.
+constexpr std::uint32_t iomux_connected = 0x0000'0080u; // Connect pin to function.
+constexpr std::uint32_t iomux_input_enable = 0x0004'0000u; // Enable digital input; needed for MISO.
+constexpr std::uint32_t iomux_pf_gpio_b17 = 0x0000'0001u; // PB17 as GPIO chip select.
+constexpr std::uint32_t iomux_pf_spi1_poci = 0x0000'0003u; // PB7 as SPI1 POCI/MISO.
+constexpr std::uint32_t iomux_pf_spi1_pico = 0x0000'0003u; // PB8 as SPI1 PICO/MOSI.
+constexpr std::uint32_t iomux_pf_spi1_sclk = 0x0000'0003u; // PB9 as SPI1 SCLK.
 
-constexpr std::uint32_t spi_ctl0_dss_8 = 0x0000'0007u;
-constexpr std::uint32_t spi_ctl0_motorola_4wire = 0x0000'0020u;
-constexpr std::uint32_t spi_ctl0_spo_high = 0x0000'0100u;
-constexpr std::uint32_t spi_ctl0_sph_second = 0x0000'0200u;
-constexpr std::uint32_t spi_ctl1_enable_mask = 0x0000'0001u;
-constexpr std::uint32_t spi_ctl1_enable = 0x0000'0001u;
-constexpr std::uint32_t spi_ctl1_controller = 0x0000'0004u;
-constexpr std::uint32_t spi_ctl1_msb_first = 0x0000'0010u;
-constexpr std::uint32_t spi_clksel_sysclk = 0x0000'0008u;
-constexpr std::uint32_t spi_clkctl_scr_mask = 0x0000'03FFu;
-constexpr std::uint32_t spi_stat_tnf_mask = 0x0000'0002u;
-constexpr std::uint32_t spi_stat_tnf_full = 0x0000'0000u;
-constexpr std::uint32_t spi_stat_rfe_mask = 0x0000'0004u;
-constexpr std::uint32_t spi_stat_rfe_empty = 0x0000'0004u;
+// SPI control and status values used by the raw register driver.
+constexpr std::uint32_t spi_ctl0_dss_8 = 0x0000'0007u; // CTL0 DSS: 8-bit frames.
+constexpr std::uint32_t spi_ctl0_motorola_4wire = 0x0000'0020u; // CTL0: Motorola 4-wire format.
+constexpr std::uint32_t spi_ctl0_spo_high = 0x0000'0100u; // CTL0 SPO: SCLK idles high.
+constexpr std::uint32_t spi_ctl0_sph_second = 0x0000'0200u; // CTL0 SPH: sample on second edge.
+constexpr std::uint32_t spi_ctl1_enable_mask = 0x0000'0001u; // CTL1 enable-bit mask.
+constexpr std::uint32_t spi_ctl1_enable = 0x0000'0001u; // CTL1: enable SPI1.
+constexpr std::uint32_t spi_ctl1_controller = 0x0000'0004u; // CTL1: controller/master mode.
+constexpr std::uint32_t spi_ctl1_msb_first = 0x0000'0010u; // CTL1: transmit MSB first.
+constexpr std::uint32_t spi_clksel_sysclk = 0x0000'0008u; // CLKSEL: select SYSCLK.
+constexpr std::uint32_t spi_clkctl_scr_mask = 0x0000'03FFu; // CLKCTL SCR: 10-bit divider field.
+constexpr std::uint32_t spi_stat_tnf_mask = 0x0000'0002u; // STAT TNF: TX FIFO status bit.
+constexpr std::uint32_t spi_stat_tnf_full = 0x0000'0000u; // TNF=0 means TX FIFO full.
+constexpr std::uint32_t spi_stat_rfe_mask = 0x0000'0004u; // STAT RFE: RX FIFO status bit.
+constexpr std::uint32_t spi_stat_rfe_empty = 0x0000'0004u; // RFE=1 means RX FIFO empty.
 
 constexpr std::uintptr_t iomux_pincm(std::uint32_t p_pin_control_number)
 {
@@ -186,12 +190,12 @@ public:
   mspm0g_spi()
   {
     mspm0g::mmio(mspm0g::gpiob_pwren) =
-        mspm0g::power_key | mspm0g::power_enable;
+        mspm0g::power_key | mspm0g::power_enable; // Turns SPI pin on.
     mspm0g::mmio(mspm0g::spi1_rstctl) =
         mspm0g::reset_key | mspm0g::reset_sticky_clear |
-        mspm0g::reset_assert;
+        mspm0g::reset_assert; // Resets the SPI pin.
     mspm0g::mmio(mspm0g::spi1_pwren) =
-        mspm0g::power_key | mspm0g::power_enable;
+        mspm0g::power_key | mspm0g::power_enable; // Enables 
     for (volatile std::uint32_t i = 0;
          i < peripheral_power_wait_cycles;
          ++i) {
