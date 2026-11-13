@@ -3,12 +3,99 @@
 #include <cstdio>
 #include <cstring>
 
-#include <ti/devices/msp/m0p/mspm0g350x.h> // Lists the addresses of hardware
-
 #include "../hal/gpio.hpp"
 #include "../hal/spi.hpp"
 
 namespace {
+
+// MSPM0G3507 memory map and register offsets.
+// These values replace the device-header register definitions.
+namespace mspm0g {
+
+// IOMUX peripheral base address.
+constexpr std::uintptr_t iomux_base = 0x4042'8000u;
+// GPIOB peripheral base address.
+constexpr std::uintptr_t gpiob_base = 0x400A'2000u;
+// SPI1 peripheral base address.
+constexpr std::uintptr_t spi1_base = 0x4046'A000u;
+
+// GPIOB power enable register.
+constexpr std::uintptr_t gpiob_pwren = gpiob_base + 0x0800u;
+// GPIOB reset control register.
+constexpr std::uintptr_t gpiob_rstctl = gpiob_base + 0x0804u;
+// GPIOB output data register.
+constexpr std::uintptr_t gpiob_dout = gpiob_base + 0x1280u;
+// GPIOB output set register.
+constexpr std::uintptr_t gpiob_doutset = gpiob_base + 0x1290u;
+// GPIOB output clear register.
+constexpr std::uintptr_t gpiob_doutclr = gpiob_base + 0x12A0u;
+// GPIOB output enable register.
+constexpr std::uintptr_t gpiob_doeset = gpiob_base + 0x12D0u;
+
+// SPI1 power enable register.
+constexpr std::uintptr_t spi1_pwren = spi1_base + 0x0800u;
+// SPI1 reset control register.
+constexpr std::uintptr_t spi1_rstctl = spi1_base + 0x0804u;
+// SPI1 reset status register.
+constexpr std::uintptr_t spi1_gprcm_stat = spi1_base + 0x0814u;
+// SPI1 clock divider register.
+constexpr std::uintptr_t spi1_clkdiv = spi1_base + 0x1000u;
+// SPI1 clock source register.
+constexpr std::uintptr_t spi1_clksel = spi1_base + 0x1004u;
+// SPI1 control register zero.
+constexpr std::uintptr_t spi1_ctl0 = spi1_base + 0x1100u;
+// SPI1 control register one.
+constexpr std::uintptr_t spi1_ctl1 = spi1_base + 0x1104u;
+// SPI1 clock control register.
+constexpr std::uintptr_t spi1_clkctl = spi1_base + 0x1108u;
+// SPI1 status register.
+constexpr std::uintptr_t spi1_stat = spi1_base + 0x1110u;
+// SPI1 receive data register.
+constexpr std::uintptr_t spi1_rxdata = spi1_base + 0x1130u;
+// SPI1 transmit data register.
+constexpr std::uintptr_t spi1_txdata = spi1_base + 0x1140u;
+
+constexpr std::uint32_t power_key = 0x2600'0000u;
+constexpr std::uint32_t power_enable = 0x0000'0001u;
+constexpr std::uint32_t reset_key = 0xB100'0000u;
+constexpr std::uint32_t reset_sticky_clear = 0x0000'0002u;
+constexpr std::uint32_t reset_assert = 0x0000'0001u;
+
+constexpr std::uint32_t iomux_connected = 0x0000'0080u;
+constexpr std::uint32_t iomux_input_enable = 0x0004'0000u;
+constexpr std::uint32_t iomux_pf_gpio_b17 = 0x0000'0001u;
+constexpr std::uint32_t iomux_pf_spi1_poci = 0x0000'0003u;
+constexpr std::uint32_t iomux_pf_spi1_pico = 0x0000'0003u;
+constexpr std::uint32_t iomux_pf_spi1_sclk = 0x0000'0003u;
+
+constexpr std::uint32_t spi_ctl0_dss_8 = 0x0000'0007u;
+constexpr std::uint32_t spi_ctl0_motorola_4wire = 0x0000'0020u;
+constexpr std::uint32_t spi_ctl0_spo_high = 0x0000'0100u;
+constexpr std::uint32_t spi_ctl0_sph_second = 0x0000'0200u;
+constexpr std::uint32_t spi_ctl1_enable_mask = 0x0000'0001u;
+constexpr std::uint32_t spi_ctl1_enable = 0x0000'0001u;
+constexpr std::uint32_t spi_ctl1_controller = 0x0000'0004u;
+constexpr std::uint32_t spi_ctl1_msb_first = 0x0000'0010u;
+constexpr std::uint32_t spi_clksel_sysclk = 0x0000'0008u;
+constexpr std::uint32_t spi_clkctl_scr_mask = 0x0000'03FFu;
+constexpr std::uint32_t spi_stat_tnf_mask = 0x0000'0002u;
+constexpr std::uint32_t spi_stat_tnf_full = 0x0000'0000u;
+constexpr std::uint32_t spi_stat_rfe_mask = 0x0000'0004u;
+constexpr std::uint32_t spi_stat_rfe_empty = 0x0000'0004u;
+
+constexpr std::uintptr_t iomux_pincm(std::uint32_t p_pin_control_number)
+{
+  // PINCM names begin at register array index one.
+  return iomux_base + (4u * p_pin_control_number);
+}
+
+// Converts hardware address into volatile register reference.
+volatile std::uint32_t& mmio(std::uintptr_t p_address)
+{
+  return *reinterpret_cast<volatile std::uint32_t*>(p_address);
+}
+
+}  // namespace mspm0g
 
 constexpr std::uint32_t bus_clock_hz = 32'000'000u;
 // W25Q command opcodes used to control the Winbond flash peripheral.
@@ -44,19 +131,20 @@ public:
     , m_pin(p_pin)
   {
     // The lab uses PB17, which is BoosterPack pin 18.
-    GPIOB->GPRCM.PWREN = GPIO_PWREN_KEY_UNLOCK_W | GPIO_PWREN_ENABLE_ENABLE;
+    mspm0g::mmio(mspm0g::gpiob_pwren) =
+        mspm0g::power_key | mspm0g::power_enable;
     for (volatile std::uint32_t i = 0;
          i < peripheral_power_wait_cycles;
          ++i) {
-      (void)GPIOB->GPRCM.PWREN;
+      (void)mspm0g::mmio(mspm0g::gpiob_pwren);
     }
-    GPIOB->GPRCM.RSTCTL = GPIO_RSTCTL_KEY_UNLOCK_W |
-                          GPIO_RSTCTL_RESETSTKYCLR_CLR |
-                          GPIO_RSTCTL_RESETASSERT_ASSERT;
-    IOMUX->SECCFG.PINCM[43] =
-        IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM43_PF_GPIOB_DIO17; // The output pin for SPI is GPIOB 17.
-    GPIOB->DOUTSET31_0 = pin_mask(m_pin); // Set to the output pin being used.
-    GPIOB->DOESET31_0 = pin_mask(m_pin);  // Enables the GPIO output pin
+    mspm0g::mmio(mspm0g::gpiob_rstctl) =
+        mspm0g::reset_key | mspm0g::reset_sticky_clear |
+        mspm0g::reset_assert;
+    mspm0g::mmio(mspm0g::iomux_pincm(43)) =
+        mspm0g::iomux_connected | mspm0g::iomux_pf_gpio_b17; // Chip Select connected to PB17 pin.
+    mspm0g::mmio(mspm0g::gpiob_doutset) = pin_mask(m_pin);
+    mspm0g::mmio(mspm0g::gpiob_doeset) = pin_mask(m_pin);
   }
 
 private:
@@ -69,19 +157,19 @@ private:
     return m_port == 1 && m_pin == 17;
   }
   // Sets the output to high or low. Turns pin on or off
-  void driver_level(bool p_high) override 
+  void driver_level(bool p_high) override
   {
     if (p_high) {
-      GPIOB->DOUTSET31_0 = pin_mask(m_pin);
+      mspm0g::mmio(mspm0g::gpiob_doutset) = pin_mask(m_pin);
     }
     else {
-      GPIOB->DOUTCLR31_0 = pin_mask(m_pin);
+      mspm0g::mmio(mspm0g::gpiob_doutclr) = pin_mask(m_pin);
     }
   }
 
   bool driver_level() override
   {
-    return (GPIOB->DOUT31_0 & pin_mask(m_pin)) != 0; // Sets output pin as output for GPIOB port.
+    return (mspm0g::mmio(mspm0g::gpiob_dout) & pin_mask(m_pin)) != 0;
   }
 };
 
@@ -97,17 +185,17 @@ class mspm0g_spi : public lab3::spi
 public:
   mspm0g_spi()
   {
-    GPIOB->GPRCM.PWREN = GPIO_PWREN_KEY_UNLOCK_W | GPIO_PWREN_ENABLE_ENABLE; // GPIOB enabled
-    // Reset SPI1 before enabling its peripheral power. This is the order
-    // used by the MSPM0 SPI initialization sequence.
-    SPI1->GPRCM.RSTCTL = SPI_RSTCTL_KEY_UNLOCK_W |
-                         SPI_RSTCTL_RESETSTKYCLR_CLR |
-                         SPI_RSTCTL_RESETASSERT_ASSERT;
-    SPI1->GPRCM.PWREN = SPI_PWREN_KEY_UNLOCK_W | SPI_PWREN_ENABLE_ENABLE; // Enables power to peripheral
+    mspm0g::mmio(mspm0g::gpiob_pwren) =
+        mspm0g::power_key | mspm0g::power_enable;
+    mspm0g::mmio(mspm0g::spi1_rstctl) =
+        mspm0g::reset_key | mspm0g::reset_sticky_clear |
+        mspm0g::reset_assert;
+    mspm0g::mmio(mspm0g::spi1_pwren) =
+        mspm0g::power_key | mspm0g::power_enable;
     for (volatile std::uint32_t i = 0;
          i < peripheral_power_wait_cycles;
          ++i) {
-      (void)SPI1->GPRCM.PWREN;
+      (void)mspm0g::mmio(mspm0g::spi1_pwren);
     }
 
     /*
@@ -115,16 +203,16 @@ public:
       SPI requires IOMUX pins to be used.
     */
     // 1. SPI signaling
-    IOMUX->SECCFG.PINCM[26] =
-        IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM26_PF_SPI1_SCLK; 
-    // Assigns SPI Clock to pin PB9.
-    IOMUX->SECCFG.PINCM[25] =
-        IOMUX_PINCM_PC_CONNECTED | IOMUX_PINCM25_PF_SPI1_PICO; 
-    // Assigns peripheral in(SPI input)/controller out to pin PB8, is for the output. PICO
-    IOMUX->SECCFG.PINCM[24] = IOMUX_PINCM_PC_CONNECTED |
-                              IOMUX_PINCM_INENA_ENABLE |
-                              IOMUX_PINCM24_PF_SPI1_POCI; 
-    // Assigns SPI output peripheral out(SPI output)/controller in to pin PB9. POCI
+    mspm0g::mmio(mspm0g::iomux_pincm(26)) =
+        mspm0g::iomux_connected | mspm0g::iomux_pf_spi1_sclk; // PB9
+    // Assigns SPI Clock to pin 26.
+    mspm0g::mmio(mspm0g::iomux_pincm(25)) =
+        mspm0g::iomux_connected | mspm0g::iomux_pf_spi1_pico; // PB8
+    // Assigns peripheral in(SPI input)/controller out to pin 25, is for the output. PICO
+    mspm0g::mmio(mspm0g::iomux_pincm(24)) =
+        mspm0g::iomux_connected | mspm0g::iomux_input_enable |
+        mspm0g::iomux_pf_spi1_poci; // PB7
+    // Assigns SPI output peripheral out(SPI output)/controller in to pin 24. POCI
 
     configure({});
   }
@@ -136,7 +224,7 @@ private:
       return false;
     }
 
-    SPI1->CTL1 &= ~SPI_CTL1_ENABLE_MASK; // Enables module
+    mspm0g::mmio(mspm0g::spi1_ctl1) &= ~mspm0g::spi_ctl1_enable_mask;
 
     const std::uint32_t frame_format = [&] {
       switch (p_settings.bus_mode) { // Selector for SPI modes: 0-3
@@ -145,21 +233,28 @@ private:
           SPI was created by Motorola, explaining the standard protocol's name.
           SPI_CTL0_SPH_SECOND sets second clock edge for capturing. Sets to sample on fall and shift on rise. Used by modes 1 and 3.
           SPI_CTL0_SPH_HIGH sets Clock Idle to 1, used by modes 2 and 3.
-
         */
-        case mode::m1: return SPI_CTL0_FRF_MOTOROLA_4WIRE | SPI_CTL0_SPH_SECOND; // Clock idle(polarity) high. Samples on fall and shifts on rise.
-        case mode::m2: return SPI_CTL0_FRF_MOTOROLA_4WIRE | SPI_CTL0_SPO_HIGH; // Clock idle(polarity) low. Samples on rise and shifts on fall. 
-        case mode::m3: return SPI_CTL0_FRF_MOTOROLA_4WIRE |
-                              SPI_CTL0_SPO_HIGH | SPI_CTL0_SPH_SECOND; // Clock idle(polarity) low. Samples on fall and shifts on rise.
-        case mode::m0: return SPI_CTL0_FRF_MOTOROLA_4WIRE; // Samples on rising edge, shifts on falling. Clock Idle is low.
+        // Modes 0 and 3 Sample Data on the rising edge and shifts data on the falling edge.
+        // Modes 1 and 2 Sample Data on the falling edge and shifts data on the rising edge.
+        // Modes 0 and 2 shift data when chip select is available.
+        case mode::m1: return mspm0g::spi_ctl0_motorola_4wire |
+                              mspm0g::spi_ctl0_sph_second;
+        case mode::m2: return mspm0g::spi_ctl0_motorola_4wire |
+                              mspm0g::spi_ctl0_spo_high;
+        case mode::m3: return mspm0g::spi_ctl0_motorola_4wire |
+                              mspm0g::spi_ctl0_spo_high |
+                              mspm0g::spi_ctl0_sph_second;
+        case mode::m0: return mspm0g::spi_ctl0_motorola_4wire;
       }
-      return std::uint32_t{SPI_CTL0_FRF_MOTOROLA_4WIRE};
+      return mspm0g::spi_ctl0_motorola_4wire;
     }();
 
-    SPI1->CLKSEL = SPI_CLKSEL_SYSCLK_SEL_ENABLE;            // Chooses sysclk for the SPI clock
-    SPI1->CLKDIV = SPI_CLKDIV_RATIO_DIV_BY_1;               // Clock uses a divider, and is divided by 1
-    SPI1->CTL0 = SPI_CTL0_DSS_DSS_8 | frame_format;         // Data size select set number of bits per transfer to 8, chooses the current mode of SPI chosen
-    SPI1->CTL1 = SPI_CTL1_CP_ENABLE | SPI_CTL1_MSB_ENABLE;  // Controller mode selected and most significant bit first for order of bits in transmission.
+    mspm0g::mmio(mspm0g::spi1_clksel) = mspm0g::spi_clksel_sysclk;
+    mspm0g::mmio(mspm0g::spi1_clkdiv) = 0;
+    mspm0g::mmio(mspm0g::spi1_ctl0) =
+        mspm0g::spi_ctl0_dss_8 | frame_format;
+    mspm0g::mmio(mspm0g::spi1_ctl1) =
+        mspm0g::spi_ctl1_controller | mspm0g::spi_ctl1_msb_first;
 
     // fSCLK = fBUSCLK / (2 * (SCR + 1)). Round down so the requested
     // maximum clock rate is never exceeded.
@@ -171,8 +266,9 @@ private:
     if (divider > 1023u) {
       divider = 1023u;
     }
-    SPI1->CLKCTL = divider & SPI_CLKCTL_SCR_MASK;
-    SPI1->CTL1 |= SPI_CTL1_ENABLE_ENABLE;
+    mspm0g::mmio(mspm0g::spi1_clkctl) =
+        divider & mspm0g::spi_clkctl_scr_mask;
+    mspm0g::mmio(mspm0g::spi1_ctl1) |= mspm0g::spi_ctl1_enable;
     return true;
   }
 
@@ -186,12 +282,12 @@ private:
         Clears data from older transfers to allow new command.
         Timeout added to remove timeout issues with clearing data.
     */
-    while ((SPI1->STAT & SPI_STAT_RFE_MASK) != SPI_STAT_RFE_EMPTY) {
+    while ((mspm0g::mmio(mspm0g::spi1_stat) &
+            mspm0g::spi_stat_rfe_mask) != mspm0g::spi_stat_rfe_empty) {
       if (timeout-- == 0) {
-        std::printf("SPI timeout: RX FIFO did not empty\n");
         return;
       }
-      (void)SPI1->RXDATA;
+      (void)mspm0g::mmio(mspm0g::spi1_rxdata);
     }
 
     // Finds the number of bytes to send and receive during transfer
@@ -204,26 +300,26 @@ private:
       const std::uint8_t tx =
           i < p_data_out.size() ? p_data_out[i] : p_filler;
       timeout = spi_poll_timeout; // Used to avoid timeout
-      while ((SPI1->STAT & SPI_STAT_TNF_MASK) == SPI_STAT_TNF_FULL) {
+      while ((mspm0g::mmio(mspm0g::spi1_stat) &
+              mspm0g::spi_stat_tnf_mask) == mspm0g::spi_stat_tnf_full) {
         if (timeout-- == 0) {
-          std::printf("SPI timeout: TX FIFO remained full\n");
           return;
         }
       }
-      SPI1->TXDATA = tx; // Transmits bits to peripheral
+      mspm0g::mmio(mspm0g::spi1_txdata) = tx;
       timeout = spi_poll_timeout;
-      while ((SPI1->STAT & SPI_STAT_RFE_MASK) == SPI_STAT_RFE_EMPTY) {
+      while ((mspm0g::mmio(mspm0g::spi1_stat) &
+              mspm0g::spi_stat_rfe_mask) == mspm0g::spi_stat_rfe_empty) {
         if (timeout-- == 0) {
-          std::printf("SPI timeout: RX FIFO remained empty after TX 0x%02X\n",
-                      tx);
           return;
         }
       }
-      /* 
+      /*
         Reads data. RXDATA(0x00001130 offset) removes received byte
         from queue. If caller has input buffer, the byte is stored into flash.
       */
-      const std::uint8_t rx = static_cast<std::uint8_t>(SPI1->RXDATA);
+      const std::uint8_t rx = static_cast<std::uint8_t>(
+          mspm0g::mmio(mspm0g::spi1_rxdata));
       if (i < p_data_in.size()) {
         p_data_in[i] = rx;
       }
@@ -254,13 +350,14 @@ public:
     const std::array<std::uint8_t, 4> command = {
       w25q_read_jedec_id, 0xFF, 0xFF, 0xFF}; // 0xFF is a default value.
     std::array<std::uint8_t, 4> response{};
-    transfer(command, response);
 
     std::printf("JEDEC TX: %02X %02X %02X %02X\n",
-            command[0], command[1], command[2], command[3]);
+                command[0], command[1], command[2], command[3]);
+    transfer(command, response);
 
     std::printf("JEDEC RX: %02X %02X %02X %02X\n",
-            response[0], response[1], response[2], response[3]);
+                response[0], response[1], response[2], response[3]);
+
     return {response[1], response[2], response[3]}; // This represents the 3 byte JEDEC ID.
   }
   // 2. Reads and prints the memory capacity
@@ -282,14 +379,14 @@ public:
     std::array<std::uint8_t, 4 + block_size> command{}; // Flash command build
     std::array<std::uint8_t, 4 + block_size> response{}; // Flash responds and sends data
     // Command array represents a flash command. One command byte to read,
-    // 3 bytes for an address. Also read as 24 bits.
+    // 3 bytes for an address. Also read as 24-bit(3-Byte).
     // 3. Block Read
     command[0] = w25q_read_data;
-    command[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte
-    command[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte
-    command[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte
+    command[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte 1
+    command[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 2
+    command[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte 3
     transfer(std::span<std::uint8_t const>(command.data(), 4 + count),
-             std::span<std::uint8_t>(response.data(), 4 + count)); // Microcontroller requests data from SPI, SPI 
+             std::span<std::uint8_t>(response.data(), 4 + count)); // Microcontroller requests data from SPI, SPI
                                                                   // responds to microcontroller command read with data response.
     std::memcpy(p_data.data(), response.data() + 4, count); // Copies from SPI buffer to controller buffer
   }
@@ -320,11 +417,11 @@ public:
     }
     // 4. Block Write
     std::array<std::uint8_t, 4 + block_size> program{};
-    program[0] = w25q_page_program; // Starts at a 24 bit address
-    program[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte 1
-    program[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 2
+    program[0] = w25q_page_program; // Starts at a 24bit(3-Byte) address
+    program[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte
+    program[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 3
     program[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte 3
-    std::memcpy(program.data() + 4, p_data.data(), count);// Start from page program, copies 
+    std::memcpy(program.data() + 4, p_data.data(), count);// Start from page program, copies
                                                           // bytes from microcontroller to flash chip
     command(std::span<std::uint8_t const>(program.data(), 4 + count));
     return wait_until_ready();
@@ -372,14 +469,14 @@ private:
     deselect();
   }
 
-  bool write_enable()
+  bool write_enable() // Enables ability to modify data on NOR flash chip, not actually writing. Writing done by page program
   {
     const std::array<std::uint8_t, 1> command_bytes = {w25q_write_enable};
     command(command_bytes);
     return true;
   }
 
-  bool wait_until_ready()
+  bool wait_until_ready() // Checks status of bit sending to make sure no other commands are being executed. Greenlights for write.
   {
     for (std::uint32_t attempt = 0; attempt < 10'000'000u; ++attempt) {
       const std::array<std::uint8_t, 2> command_bytes = {
@@ -406,26 +503,13 @@ int main()
 
   spi.configure({.clock_rate = 500'000, .bus_mode = lab3::spi::mode::m0});
   std::printf("SPI configured\n");
-  std::printf("--- SPI register diagnostics ---\n");
-  std::printf("SPI PWREN: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->GPRCM.PWREN));
-  std::printf("SPI RSTSTAT: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->GPRCM.STAT));
-  std::printf("SPI CTL0: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->CTL0));
-  std::printf("SPI CTL1: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->CTL1));
-  std::printf("SPI CLKSEL: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->CLKSEL));
-  std::printf("SPI STAT: 0x%08lX\n",
-              static_cast<unsigned long>(SPI1->STAT));
   const auto id = flash.read_jedec_id(); // Used to print the manufacturer's ID.
   std::printf("Touched\n");
   const std::uint32_t capacity = flash.capacity_bytes(); // Used to print size of flash chip.
   std::array<std::uint8_t, block_size> block{};
   flash.read_block(block);
 
-  std::printf("JEDEC manufacturer ID: 0x%02X\n", id[0]); // Step 2
+  std::printf("JEDEC manufacturer ID: 0x%02X\n", id[0]);
   std::printf("JEDEC type: 0x%02X, density code: 0x%02X\n", id[1], id[2]);
   std::printf("Flash capacity: %lu bytes (%lu KiB)\n",
               static_cast<unsigned long>(capacity),
