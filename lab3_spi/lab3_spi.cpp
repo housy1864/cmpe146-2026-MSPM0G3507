@@ -91,6 +91,7 @@ constexpr std::uintptr_t iomux_pincm(std::uint32_t p_pin_control_number)
 {
   // PINCM names begin at register array index one.
   return iomux_base + (4u * p_pin_control_number);
+  //calculates the memory address of a specific IOMUX PINCM register. Each PINCM register occupies 4 bytes
 }
 
 // Converts hardware address into volatile register reference.
@@ -174,6 +175,7 @@ private:
   bool driver_level() override
   {
     return (mspm0g::mmio(mspm0g::gpiob_dout) & pin_mask(m_pin)) != 0;
+    // reads the current output state of a GPIO pin -> CS
   }
 };
 
