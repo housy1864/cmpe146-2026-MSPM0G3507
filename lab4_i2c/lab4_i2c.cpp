@@ -369,7 +369,7 @@ private:
 
         last_read_success = true;
 
-        // Combine low and high bytes into signed 16-bit values
+        // Combine low and high bytes into signed 16-bit values -- BMI P2
         std::int16_t raw_x =
             static_cast<std::int16_t>(
                 (static_cast<std::uint16_t>(data[1]) << 8) | data[0]);
@@ -405,18 +405,18 @@ public:
         // First verify the chip ID
         std::uint8_t chip_id = 0;
 
-        if (!read_registers(0x00, &chip_id, 1))
+        if (!read_registers(0x00, &chip_id, 1)) //BMI P49
         {
             return false;
         }
 
-        if (chip_id != 0xD1)
+        if (chip_id != 0xD1) 
         {
             return false;
         }
 
-        // Command register 0x7E
-        // Command 0x11 switches accelerometer to normal mode
+        // Command register 0x7E -- BMI P49
+        // Command 0x11 switches accelerometer to normal mode -- BMI P86
         if (!write_register(0x7E, 0x11))
         {
             return false;
@@ -462,7 +462,7 @@ int main()
     std::printf("Reading accelerometer data...\n\n");
     std::fflush(stdout);
 
-    constexpr float PI = 3.14159265f;
+    constexpr float PI = 3.14159265358f;
 
     while (true)
     {
@@ -488,9 +488,9 @@ int main()
                 ) * 180.0f / PI;
 
             std::printf(
-                "Acceleration X: %7.3f g | "
-                "Y: %7.3f g | "
-                "Z: %7.3f g | "
+                "Acceleration [X:%7.3fg] "
+                "[Y:%7.3fg]"
+                "[Z:%7.3fg]"
                 "Roll: %7.2f deg | "
                 "Pitch: %7.2f deg\n",
                 acceleration.x,
