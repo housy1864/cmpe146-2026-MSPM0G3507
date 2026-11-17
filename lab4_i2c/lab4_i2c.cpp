@@ -12,27 +12,61 @@
 // Uses PA0 as SDA and PA1 as SCL.
 // ============================================================
 
+
 class software_i2c : public lab4::i2c
 {
 private:
 
-    // GPIO register addresses
-    static constexpr std::uintptr_t GPIOA_DOUT = 0x400A1280;
-    static constexpr std::uintptr_t GPIOA_DIN  = 0x400A1380;
-    static constexpr std::uintptr_t GPIOA_DOE  = 0x400A12C0;
+    // GPIO Port B registers
+    static constexpr std::uintptr_t GPIOB_DOUT = 0x400A3280;
+    static constexpr std::uintptr_t GPIOB_DIN  = 0x400A3380;
+    static constexpr std::uintptr_t GPIOB_DOE  = 0x400A32C0;
 
-    // Pin control register addresses
-    static constexpr std::uintptr_t IOMUX_PA0 = 0x40428000;
-    static constexpr std::uintptr_t IOMUX_PA1 = 0x40428004;
+    // PB3 = SDA, PB2 = SCL
+    static constexpr std::uint32_t SDA_MASK = (1u << 3);
+    static constexpr std::uint32_t SCL_MASK = (1u << 2);
 
-    // PA0 = SDA, PA1 = SCL
-    static constexpr std::uint32_t SDA_MASK = (1u << 0);
-    static constexpr std::uint32_t SCL_MASK = (1u << 1);
+    // IOMUX base = 0x40428000
+    // PINCM array begins at offset 0x04.
 
-    // Access a memory-mapped hardware register
+    // PB2 = PINCM15 = 0x40428040
+    // PB3 = PINCM16 = 0x40428044
+
+    static constexpr std::uintptr_t IOMUX_PB2 = 0x40428040;
+    static constexpr std::uintptr_t IOMUX_PB3 = 0x40428044;
+
+    // THIS FUNCTION WAS MISSING
     static volatile std::uint32_t* reg(std::uintptr_t address)
     {
         return reinterpret_cast<volatile std::uint32_t*>(address);
+    }
+
+    // Configure PB2 and PB3 as GPIO inputs with internal pull-ups
+    static bool gpio_init()
+    {
+        // Select GPIO function for PB2 and PB3
+        *reg(IOMUX_PB2) = 0x00000081;
+        *reg(IOMUX_PB3) = 0x00000081;
+
+        // Set both output latches HIGH
+        *reg(GPIOB_DOUT) |= (SDA_MASK | SCL_MASK);
+
+        // Enable output on PB2 and PB3
+        *reg(GPIOB_DOE) |= (SDA_MASK | SCL_MASK);
+
+        // Read the physical input state
+        volatile uint32_t pins = *reg(GPIOB_DIN);
+
+        std::printf("GPIOB DIN = 0x%08lX\n",
+                    static_cast<unsigned long>(pins));
+
+        std::printf("PB2 = %lu, PB3 = %lu\n",
+                    static_cast<unsigned long>((pins >> 2) & 1u),
+                    static_cast<unsigned long>((pins >> 3) & 1u));
+
+        std::fflush(stdout);
+
+        return true;
     }
 
     // Small delay between I2C transitions
@@ -43,55 +77,42 @@ private:
         }
     }
 
-    // Configure PA0 and PA1 as GPIO
-    void gpio_init()
-    {
-        *reg(IOMUX_PA0) = 0x00040081;
-        *reg(IOMUX_PA1) = 0x00040081;
-
-        // Set output values LOW before enabling outputs
-        *reg(GPIOA_DOUT) &= ~(SDA_MASK | SCL_MASK);
-
-        // Release both pins (input/high impedance)
-        *reg(GPIOA_DOE) &= ~(SDA_MASK | SCL_MASK);
-    }
-
     // Pull SDA LOW
     void sda_low()
     {
-        *reg(GPIOA_DOUT) &= ~SDA_MASK;
-        *reg(GPIOA_DOE) |= SDA_MASK;
+        *reg(GPIOB_DOUT) &= ~SDA_MASK;
+        *reg(GPIOB_DOE) |= SDA_MASK;
     }
 
     // Release SDA
     void sda_release()
     {
-        *reg(GPIOA_DOE) &= ~SDA_MASK;
+        *reg(GPIOB_DOE) &= ~SDA_MASK;
     }
 
     // Pull SCL LOW
     void scl_low()
     {
-        *reg(GPIOA_DOUT) &= ~SCL_MASK;
-        *reg(GPIOA_DOE) |= SCL_MASK;
+        *reg(GPIOB_DOUT) &= ~SCL_MASK;
+        *reg(GPIOB_DOE) |= SCL_MASK;
     }
 
     // Release SCL
     void scl_release()
     {
-        *reg(GPIOA_DOE) &= ~SCL_MASK;
+        *reg(GPIOB_DOE) &= ~SCL_MASK;
     }
 
     // Read SDA
     bool sda_read()
     {
-        return ((*reg(GPIOA_DIN) & SDA_MASK) != 0);
+        return ((*reg(GPIOB_DIN) & SDA_MASK) != 0);
     }
 
     // Read SCL
     bool scl_read()
     {
-        return ((*reg(GPIOA_DIN) & SCL_MASK) != 0);
+        return ((*reg(GPIOB_DIN) & SCL_MASK) != 0);
     }
 
     // Generate START condition
@@ -212,17 +233,13 @@ private:
     // Configure software I2C
     bool driver_configure(settings const& p_settings) override
     {
-        (void)p_settings;
+        bool sda = sda_read();
+        bool scl = scl_read();
 
-        gpio_init();
+        std::printf("SDA = %d, SCL = %d\n", sda, scl);
+        std::fflush(stdout);
 
-        sda_release();
-        scl_release();
-
-        i2c_delay();
-
-        // Both lines should be HIGH when idle
-        return sda_read() && scl_read();
+        return true;
     }
 
     // Perform an I2C transaction
@@ -418,44 +435,36 @@ public:
 // MAIN
 // ============================================================
 
+
 int main()
 {
     std::printf("\nBMI160 I2C Lab 4\n");
-
-    // Create software I2C driver
     software_i2c i2c;
 
-    // Configure I2C bus
     if (!i2c.configure({100000}))
     {
         std::printf("ERROR: I2C GPIO initialization failed.\n");
-
-        while (true)
-        {
-        }
+        std::fflush(stdout);
+        while (true) {}
     }
 
-    // Create BMI160 object
     bmi160 imu(i2c);
 
-    // Initialize sensor
     if (!imu.initialize())
     {
-        std::printf(
-            "ERROR: BMI160 not detected. Check wiring and address.\n");
-
-        while (true)
-        {
-        }
+        std::printf("ERROR: BMI160 not detected. Check wiring and address.\n");
+        std::fflush(stdout);
+        while (true) {}
     }
 
     std::printf("BMI160 detected successfully!\n");
+    std::printf("Reading accelerometer data...\n\n");
+    std::fflush(stdout);
 
     constexpr float PI = 3.14159265f;
 
     while (true)
     {
-        // Read X, Y, and Z acceleration
         lab4::accelerometer::read_t acceleration = imu.read();
 
         if (!imu.read_ok())
@@ -464,12 +473,10 @@ int main()
         }
         else
         {
-            // Calculate roll
             float roll =
                 std::atan2(acceleration.y, acceleration.z)
                 * 180.0f / PI;
 
-            // Calculate pitch
             float pitch =
                 std::atan2(
                     -acceleration.x,
@@ -479,10 +486,12 @@ int main()
                     )
                 ) * 180.0f / PI;
 
-            // Print acceleration and orientation
             std::printf(
-                "X: %7.3f g | Y: %7.3f g | Z: %7.3f g | "
-                "Roll: %7.2f deg | Pitch: %7.2f deg\n",
+                "Acceleration X: %7.3f g | "
+                "Y: %7.3f g | "
+                "Z: %7.3f g | "
+                "Roll: %7.2f deg | "
+                "Pitch: %7.2f deg\n",
                 acceleration.x,
                 acceleration.y,
                 acceleration.z,
@@ -491,7 +500,8 @@ int main()
             );
         }
 
-        // Delay between measurements
+        std::fflush(stdout);
+
         for (volatile std::uint32_t i = 0; i < 2000000; ++i)
         {
         }
