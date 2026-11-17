@@ -23,7 +23,7 @@ private:
     static constexpr std::uintptr_t GPIOB_PWREN = //P677
     GPIOB_BASE + 0x800;
 
-    // PB3 = SDA, PB2 = SCL
+    // PB3 = SDA, PB2 = SCL. Shifts bytes instead of equalizing to exact values to know which exact bits are modified.
     static constexpr std::uint32_t SDA_MASK = (1u << 3);
     static constexpr std::uint32_t SCL_MASK = (1u << 2);
 
@@ -447,7 +447,7 @@ int main()
         std::printf("ERROR: I2C GPIO initialization failed.\n");
         std::fflush(stdout);
         while (true) {}
-    }
+    } // Based on the 1-Phase Initialization of powering on the microcontroller I2C peripheral. Fails at constructor, returns error from constructor.
 
     bmi160 imu(i2c);
 
@@ -456,7 +456,7 @@ int main()
         std::printf("ERROR: BMI160 not detected. Check wiring and address.\n");
         std::fflush(stdout);
         while (true) {}
-    }
+    } // Based on the 1-Phase Initialization of powering on the imu I2C peripheral. Fails at constructor, returns error from constructor.
 
     std::printf("BMI160 detected successfully!\n");
     std::printf("Reading accelerometer data...\n\n");
