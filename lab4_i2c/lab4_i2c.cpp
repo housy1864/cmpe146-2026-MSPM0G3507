@@ -21,6 +21,7 @@ private:
     static constexpr std::uintptr_t GPIOB_DOUT = 0x400A3280;
     static constexpr std::uintptr_t GPIOB_DIN  = 0x400A3380;
     static constexpr std::uintptr_t GPIOB_DOE  = 0x400A32C0;
+    static constexpr std::uintptr_t GPIOB_PWREN = 0x400A2800;
 
     // PB3 = SDA, PB2 = SCL
     static constexpr std::uint32_t SDA_MASK = (1u << 3);
@@ -44,6 +45,7 @@ private:
     // Configure PB2 and PB3 as GPIO inputs with internal pull-ups
     static bool gpio_init()
     {
+        *reg(GPIOB_PWREN) = 0x26000001;
         // Select GPIO function for PB2 and PB3
         *reg(IOMUX_PB2) = 0x00000081;
         *reg(IOMUX_PB3) = 0x00000081;
