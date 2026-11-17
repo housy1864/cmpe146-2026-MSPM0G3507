@@ -11,27 +11,27 @@ class software_i2c : public lab4::i2c
 {
 private:
 
-    // GPIO Port B registers
-    static constexpr std::uintptr_t GPIOB_BASE = 0x400A2000;
+    // Hardware register definitions
+    // GPIO Port B registers - GPIO initialization
+    static constexpr std::uintptr_t GPIOB_BASE = 0x400A2000; //P59/120
 
-    static constexpr std::uintptr_t GPIOB_DOUT = GPIOB_BASE + 0x1280;
-    static constexpr std::uintptr_t GPIOB_DOE  = GPIOB_BASE + 0x12C0;
-    static constexpr std::uintptr_t GPIOB_DIN  = GPIOB_BASE + 0x1380;
+    // P667, 672
+    static constexpr std::uintptr_t GPIOB_DOUT = GPIOB_BASE + 0x1280; //P730
+    static constexpr std::uintptr_t GPIOB_DOE  = GPIOB_BASE + 0x12C0; //P742
+    static constexpr std::uintptr_t GPIOB_DIN  = GPIOB_BASE + 0x1380; //P795
 
-    static constexpr std::uintptr_t GPIOB_PWREN =
+    static constexpr std::uintptr_t GPIOB_PWREN = //P677
     GPIOB_BASE + 0x800;
 
     // PB3 = SDA, PB2 = SCL
     static constexpr std::uint32_t SDA_MASK = (1u << 3);
     static constexpr std::uint32_t SCL_MASK = (1u << 2);
 
-    // IOMUX base = 0x40428000
-    // PINCM array begins at offset 0x04.
-
+    // IOMUX base = 0x40428000 -- P59/120
+    // PINCM array begins at offset 0x04 -- P13/120
     static constexpr std::uintptr_t IOMUX_PB2 = 0x4042803C;
     static constexpr std::uintptr_t IOMUX_PB3 = 0x40428040;
 
-    // THIS FUNCTION WAS MISSING
     static volatile std::uint32_t* reg(std::uintptr_t address)
     {
         return reinterpret_cast<volatile std::uint32_t*>(address);
@@ -41,9 +41,9 @@ private:
     static bool gpio_init()
     {
         // Enable GPIO Port B
-        *reg(GPIOB_PWREN) = 0x26000001;
+        *reg(GPIOB_PWREN) = 0x26000001; //P796
 
-        // Configure PB2 = SCL and PB3 = SDA as GPIO
+        // PB2 = SCL and PB3 = SDA 
         // Enable input and internal pull-up
         *reg(IOMUX_PB2) = 0x00060081;
         *reg(IOMUX_PB3) = 0x00060081;
@@ -225,7 +225,7 @@ private:
     // Configure software I2C
     bool driver_configure(settings const& p_settings) override
     {
-        (void)p_settings;
+        // (void)p_settings;
 
         // Initialize GPIO BEFORE accessing either pin
         if (!gpio_init())
