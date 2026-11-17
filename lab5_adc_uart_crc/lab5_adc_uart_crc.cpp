@@ -54,8 +54,94 @@ extern "C" void ADC0_IRQHandler()
 //
 // Add the matching `extern "C" void UARTn_IRQHandler()` for the UART instance
 // you pick (UART0 through UART3).
-class serial_driver
-{};
+class uart_serial_driver : public lab6::serial
+{
+private:
+  bool driver_configure(settings const& p_settings) override
+  {
+    // UART1 uses the 32 MHz BUSCLK on the MSPM0G3507.  Keep this value here
+    // until the driver grows a configurable clock-source selection.
+    constexpr std::uint32_t uart_clock_hz = 32'000'000U;
+    constexpr std::uint32_t oversampling = 16U;
+
+    if (p_settings.baud_rate == 0U) {
+      return false;
+    }
+
+    // With 16x oversampling, the UART divisor is represented as:
+    //
+    //   divisor = IBRD + FBRD / 64
+    //
+    // Round the fractional part to the nearest representable value.  Do all
+    // validation before touching the peripheral registers.
+    std::uint32_t const divisor_x64 =
+      (uart_clock_hz * 64U + (oversampling * p_settings.baud_rate) / 2U) /
+      (oversampling * p_settings.baud_rate);
+    std::uint32_t const integer_divisor = divisor_x64 / 64U;
+    std::uint32_t const fractional_divisor = divisor_x64 % 64U;
+
+    if (integer_divisor == 0U || integer_divisor > 0xFFFFU) {
+      return false;
+    }
+
+    std::uint32_t parity = UART_LCRH_PEN_DISABLE;
+    switch (p_settings.parity) {
+      case settings::parity::none:
+        break;
+      case settings::parity::odd:
+        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_ODD;
+        break;
+      case settings::parity::even:
+        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_EVEN;
+        break;
+      case settings::parity::forced1:
+        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
+                 UART_LCRH_EPS_ODD;
+        break;
+      case settings::parity::forced0:
+        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
+                 UART_LCRH_EPS_EVEN;
+        break;
+    }
+
+    // The LaunchPad diagram routes this UART through PA8 (TX) and PA9 (RX).
+    // J14 must be installed in position 2-3 so the header RX signal selects
+    // PA9 rather than PB23.
+    IOMUX->SECCFG.PINCM[IOMUX_PINCM19] =
+      IOMUX_PINCM19_PF_UART1_TX | IOMUX_PINCM_PC_CONNECTED;
+    IOMUX->SECCFG.PINCM[IOMUX_PINCM20] =
+      IOMUX_PINCM20_PF_UART1_RX | IOMUX_PINCM_PC_CONNECTED |
+      IOMUX_PINCM_INENA_ENABLE | IOMUX_PINCM_PIPU_ENABLE;
+
+    // Register-level UART1 configuration.
+    UART1->GPRCM.PWREN =
+      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE;
+    UART1->GPRCM.RSTCTL =
+      UART_RSTCTL_KEY_UNLOCK_W | UART_RSTCTL_RESETSTKYCLR_CLR |
+      UART_RSTCTL_RESETASSERT_ASSERT;
+
+    UART1->CLKSEL = UART_CLKSEL_BUSCLK_SEL_ENABLE;
+    UART1->CLKDIV = UART_CLKDIV_RATIO_DIV_BY_1;
+
+    UART1->CTL0 = UART_CTL0_MODE_UART | UART_CTL0_HSE_OVS16 |
+                  UART_CTL0_TXE_ENABLE | UART_CTL0_RXE_ENABLE;
+    UART1->LCRH = UART_LCRH_WLEN_DATABIT8 | parity |
+                  (p_settings.stop == settings::stop_bits::two
+                     ? UART_LCRH_STP2_ENABLE
+                     : UART_LCRH_STP2_DISABLE);
+    UART1->IBRD = integer_divisor;
+    UART1->FBRD = fractional_divisor;
+
+    // The UART requires an LCRH write after changing IBRD/FBRD.  Rewriting
+    // the complete line-control value also makes the ordering explicit.
+    UART1->LCRH = UART_LCRH_WLEN_DATABIT8 | parity |
+                  (p_settings.stop == settings::stop_bits::two
+                     ? UART_LCRH_STP2_ENABLE
+                     : UART_LCRH_STP2_DISABLE);
+    UART1->CTL0 |= UART_CTL0_ENABLE_ENABLE;
+    return true;
+  }
+};
 
 // =============================================================================
 // Role 3: CRC
