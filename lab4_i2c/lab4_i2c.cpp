@@ -34,8 +34,8 @@ private:
     // IOMUX base = 0x40428000
     // PINCM array begins at offset 0x04.
 
-    static constexpr std::uintptr_t IOMUX_PB2 = 0x4042803C;
-    static constexpr std::uintptr_t IOMUX_PB3 = 0x40428040;
+    static constexpr std::uintptr_t IOMUX_PB2 = 0x40428040;
+    static constexpr std::uintptr_t IOMUX_PB3 = 0x40428044;
 
     // THIS FUNCTION WAS MISSING
     static volatile std::uint32_t* reg(std::uintptr_t address)
@@ -49,14 +49,15 @@ private:
         // Enable GPIO Port B
         *reg(GPIOB_PWREN) = 1;
 
-        // Configure PB2 and PB3 as GPIO with input and pull-up
+        // Configure PB2 = SCL and PB3 = SDA as GPIO
+        // Enable input and internal pull-up
         *reg(IOMUX_PB2) = 0x00060081;
         *reg(IOMUX_PB3) = 0x00060081;
 
-        // Keep output latch LOW
+        // Set output latches LOW
         *reg(GPIOB_DOUT) &= ~(SDA_MASK | SCL_MASK);
 
-        // Release both I2C lines
+        // Release both pins (open-drain operation)
         *reg(GPIOB_DOE) &= ~(SDA_MASK | SCL_MASK);
 
         return true;
@@ -228,16 +229,19 @@ private:
     {
         (void)p_settings;
 
+        // Initialize GPIO BEFORE accessing either pin
         if (!gpio_init())
         {
             return false;
         }
 
+        // Release both I2C lines
         sda_release();
         scl_release();
 
         i2c_delay();
 
+        // Verify idle bus state
         bool sda = sda_read();
         bool scl = scl_read();
 
