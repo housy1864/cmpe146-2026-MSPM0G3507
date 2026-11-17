@@ -225,7 +225,7 @@ private:
     // Configure software I2C
     bool driver_configure(settings const& p_settings) override
     {
-        // (void)p_settings;
+        (void)p_settings;
 
         // Initialize GPIO BEFORE accessing either pin
         if (!gpio_init())
