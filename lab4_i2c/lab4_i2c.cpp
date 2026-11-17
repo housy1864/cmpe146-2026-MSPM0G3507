@@ -47,7 +47,7 @@ private:
     static bool gpio_init()
     {
         // Enable GPIO Port B
-        *reg(GPIOB_PWREN) = 1;
+        *reg(GPIOB_PWREN) = 0x26000001;
 
         // Configure PB2 = SCL and PB3 = SDA as GPIO
         // Enable input and internal pull-up
