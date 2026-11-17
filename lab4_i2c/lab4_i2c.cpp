@@ -18,10 +18,14 @@ class software_i2c : public lab4::i2c
 private:
 
     // GPIO Port B registers
-    static constexpr std::uintptr_t GPIOB_DOUT = 0x400A3280;
-    static constexpr std::uintptr_t GPIOB_DIN  = 0x400A3380;
-    static constexpr std::uintptr_t GPIOB_DOE  = 0x400A32C0;
-    static constexpr std::uintptr_t GPIOB_PWREN = 0x400A2800;
+    static constexpr std::uintptr_t GPIOB_BASE = 0x400A2000;
+
+    static constexpr std::uintptr_t GPIOB_DOUT = GPIOB_BASE + 0x1280;
+    static constexpr std::uintptr_t GPIOB_DOE  = GPIOB_BASE + 0x12C0;
+    static constexpr std::uintptr_t GPIOB_DIN  = GPIOB_BASE + 0x1380;
+
+    static constexpr std::uintptr_t GPIOB_PWREN =
+    GPIOB_BASE + 0x800;
 
     // PB3 = SDA, PB2 = SCL
     static constexpr std::uint32_t SDA_MASK = (1u << 3);
@@ -29,9 +33,6 @@ private:
 
     // IOMUX base = 0x40428000
     // PINCM array begins at offset 0x04.
-
-    // PB2 = PINCM15 = 0x40428040
-    // PB3 = PINCM16 = 0x40428044
 
     static constexpr std::uintptr_t IOMUX_PB2 = 0x40428040;
     static constexpr std::uintptr_t IOMUX_PB3 = 0x40428044;
@@ -45,7 +46,7 @@ private:
     // Configure PB2 and PB3 as GPIO inputs with internal pull-ups
     static bool gpio_init()
     {
-        *reg(GPIOB_PWREN) = 0x26000001;
+        *reg(GPIOB_PWREN) = 1;
         // Select GPIO function for PB2 and PB3
         *reg(IOMUX_PB2) = 0x00000081;
         *reg(IOMUX_PB3) = 0x00000081;
