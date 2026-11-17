@@ -51,8 +51,15 @@ private:
 
         // Configure PB2 = SCL and PB3 = SDA as GPIO
         // Enable input and internal pull-up
+        // *reg(IOMUX_PB2) = 0x00060081;
+        // *reg(IOMUX_PB3) = 0x00060081;
+
         *reg(IOMUX_PB2) = 0x00060081;
         *reg(IOMUX_PB3) = 0x00060081;
+
+        // Release both lines
+        *reg(GPIOB_DOUT) |= (SDA_MASK | SCL_MASK);
+        *reg(GPIOB_DOE) &= ~(SDA_MASK | SCL_MASK);
 
         // Set output latches LOW
         *reg(GPIOB_DOUT) &= ~(SDA_MASK | SCL_MASK);
