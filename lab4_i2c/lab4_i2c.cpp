@@ -34,8 +34,8 @@ private:
     // IOMUX base = 0x40428000
     // PINCM array begins at offset 0x04.
 
-    static constexpr std::uintptr_t IOMUX_PB2 = 0x40428040;
-    static constexpr std::uintptr_t IOMUX_PB3 = 0x40428044;
+    static constexpr std::uintptr_t IOMUX_PB2 = 0x40428038;
+    static constexpr std::uintptr_t IOMUX_PB3 = 0x4042803C;
 
     // THIS FUNCTION WAS MISSING
     static volatile std::uint32_t* reg(std::uintptr_t address)
