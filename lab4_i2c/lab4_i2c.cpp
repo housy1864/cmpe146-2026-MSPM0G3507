@@ -7,12 +7,6 @@
 #include "../hal/accelerometer.hpp"
 #include "../hal/i2c.hpp"
 
-// ============================================================
-// SOFTWARE I2C DRIVER
-// Uses PA0 as SDA and PA1 as SCL.
-// ============================================================
-
-
 class software_i2c : public lab4::i2c
 {
 private:
@@ -34,8 +28,8 @@ private:
     // IOMUX base = 0x40428000
     // PINCM array begins at offset 0x04.
 
-    static constexpr std::uintptr_t IOMUX_PB2 = 0x40428038;
-    static constexpr std::uintptr_t IOMUX_PB3 = 0x4042803C;
+    static constexpr std::uintptr_t IOMUX_PB2 = 0x4042803C;
+    static constexpr std::uintptr_t IOMUX_PB3 = 0x40428040;
 
     // THIS FUNCTION WAS MISSING
     static volatile std::uint32_t* reg(std::uintptr_t address)
@@ -51,9 +45,6 @@ private:
 
         // Configure PB2 = SCL and PB3 = SDA as GPIO
         // Enable input and internal pull-up
-        // *reg(IOMUX_PB2) = 0x00060081;
-        // *reg(IOMUX_PB3) = 0x00060081;
-
         *reg(IOMUX_PB2) = 0x00060081;
         *reg(IOMUX_PB3) = 0x00060081;
 
