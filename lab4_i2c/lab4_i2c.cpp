@@ -46,28 +46,18 @@ private:
     // Configure PB2 and PB3 as GPIO inputs with internal pull-ups
     static bool gpio_init()
     {
+        // Enable GPIO Port B (same pattern as Lab 1)
         *reg(GPIOB_PWREN) = 1;
-        // Select GPIO function for PB2 and PB3
-        *reg(IOMUX_PB2) = 0x00000081;
-        *reg(IOMUX_PB3) = 0x00000081;
 
-        // Set both output latches HIGH
-        *reg(GPIOB_DOUT) |= (SDA_MASK | SCL_MASK);
+        // Configure PB2 and PB3 as GPIO, with input and pull-up enabled
+        *reg(IOMUX_PB2) = 0x00060081;
+        *reg(IOMUX_PB3) = 0x00060081;
 
-        // Enable output on PB2 and PB3
-        *reg(GPIOB_DOE) |= (SDA_MASK | SCL_MASK);
+        // Set output latches LOW
+        *reg(GPIOB_DOUT) &= ~(SDA_MASK | SCL_MASK);
 
-        // Read the physical input state
-        volatile uint32_t pins = *reg(GPIOB_DIN);
-
-        std::printf("GPIOB DIN = 0x%08lX\n",
-                    static_cast<unsigned long>(pins));
-
-        std::printf("PB2 = %lu, PB3 = %lu\n",
-                    static_cast<unsigned long>((pins >> 2) & 1u),
-                    static_cast<unsigned long>((pins >> 3) & 1u));
-
-        std::fflush(stdout);
+        // Release both lines (open-drain behavior)
+        *reg(GPIOB_DOE) &= ~(SDA_MASK | SCL_MASK);
 
         return true;
     }
@@ -236,13 +226,27 @@ private:
     // Configure software I2C
     bool driver_configure(settings const& p_settings) override
     {
+        (void)p_settings;
+
+        // Initialize GPIO before reading the pins
+        if (!gpio_init())
+        {
+            return false;
+        }
+
+        // Release both I2C lines
+        sda_release();
+        scl_release();
+
+        i2c_delay();
+
         bool sda = sda_read();
         bool scl = scl_read();
 
         std::printf("SDA = %d, SCL = %d\n", sda, scl);
         std::fflush(stdout);
 
-        return true;
+        return sda && scl;
     }
 
     // Perform an I2C transaction
