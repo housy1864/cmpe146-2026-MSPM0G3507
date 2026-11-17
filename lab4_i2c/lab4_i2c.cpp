@@ -15,7 +15,7 @@ private:
     // GPIO Port B registers - GPIO initialization
     static constexpr std::uintptr_t GPIOB_BASE = 0x400A2000; //P59/120
 
-    // P667, 672
+    // P667; 672
     static constexpr std::uintptr_t GPIOB_DOUT = GPIOB_BASE + 0x1280; //P730
     static constexpr std::uintptr_t GPIOB_DOE  = GPIOB_BASE + 0x12C0; //P742
     static constexpr std::uintptr_t GPIOB_DIN  = GPIOB_BASE + 0x1380; //P795
@@ -322,9 +322,9 @@ class bmi160 : public lab4::accelerometer
 {
 private:
 
-    static constexpr std::uint8_t BMI160_ADDRESS = 0x69;
+    static constexpr std::uint8_t BMI160_ADDRESS = 0x69; //BMI P93
 
-    static constexpr float SENSITIVITY = 16384.0f;
+    static constexpr float SENSITIVITY = 16384.0f; //BMI P59; 8
 
     lab4::i2c& i2c_bus;
 
@@ -360,7 +360,7 @@ private:
     {
         std::uint8_t data[6] = {};
 
-        // Acceleration registers start at 0x12
+        // Acceleration registers start at 0x12 -- BMI P52
         if (!read_registers(0x12, data, 6))
         {
             last_read_success = false;
