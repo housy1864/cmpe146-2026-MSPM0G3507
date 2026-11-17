@@ -490,9 +490,9 @@ int main()
             std::printf(
                 "Acceleration [X:%7.3fg] "
                 "[Y:%7.3fg]"
-                "[Z:%7.3fg]"
-                "Roll: %7.2f deg | "
-                "Pitch: %7.2f deg\n",
+                "[Z:%7.3fg] "    
+                "Roll:%7.2f deg | "
+                "Pitch:%7.2f deg\n",
                 acceleration.x,
                 acceleration.y,
                 acceleration.z,
