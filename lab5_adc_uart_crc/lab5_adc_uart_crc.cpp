@@ -186,9 +186,26 @@ private:
         DL_ADC12_startConversion(ADC0);
 
         // Sleep until the ADC interrupt notifies this task.
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // Wait up to 1 second for the ADC interrupt.
+        uint32_t notification = ulTaskNotifyTake(
+            pdTRUE,
+            pdMS_TO_TICKS(1000)
+        );
 
-        // Stop conversions after the transfer finishes.
+        if (notification == 0)
+        {
+            std::printf("ERROR: ADC DMA timeout!\n");
+
+            DL_ADC12_stopConversion(ADC0);
+            DL_ADC12_disableDMA(ADC0);
+            DL_DMA_disableChannel(DMA, adc_dma_channel);
+
+            adc_waiting_task = nullptr;
+            return;
+        }
+
+        std::printf("ADC interrupt received!\n");
+
         DL_ADC12_stopConversion(ADC0);
         DL_ADC12_disableDMA(ADC0);
 
