@@ -178,19 +178,48 @@ private:
         // Remember which task must be awakened after sampling.
         adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-        // Re-enable DMA and ADC DMA requests.
+        // Enable DMA and ADC DMA requests.
         DL_DMA_enableChannel(DMA, adc_dma_channel);
         DL_ADC12_enableDMA(ADC0);
 
+        // // Start repeated ADC conversions.
+        // DL_ADC12_startConversion(ADC0);
+
+        // // Sleep until the ADC interrupt notifies this task.
+        // ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // // Stop conversions after the transfer finishes.
+        // DL_ADC12_stopConversion(ADC0);
+        // DL_ADC12_disableDMA(ADC0);
+
+
+        // Temperatory timeout 
         // Start repeated ADC conversions.
-        DL_ADC12_startConversion(ADC0);
+        DL_ADC12_startConversion(ADC0);     
+        // Wait for DMA completion.
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) == 0)
+        {
+            DL_ADC12_stopConversion(ADC0);
+            DL_ADC12_disableDMA(ADC0);
+            DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-        // Sleep until the ADC interrupt notifies this task.
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            adc_waiting_task = nullptr;
 
-        // Stop conversions after the transfer finishes.
+            std::printf("ADC DMA timeout!\n");
+            return;
+        }
+
+        // DMA finished.
         DL_ADC12_stopConversion(ADC0);
         DL_ADC12_disableDMA(ADC0);
+
+        adc_waiting_task = nullptr;
+
+        // Convert samples.
+        for (auto& sample : buffer)
+        {
+            sample = upscale_12_to_16(sample);
+        }
 
         // Convert all 12-bit values to the required 16-bit format.
         for (auto& sample : buffer)
