@@ -89,8 +89,12 @@ public:
     );
 
     // ADC DMA completion interrupt.
-    DL_ADC12_enableInterrupt(ADC0, DL_ADC12_INTERRUPT_DMA_DONE);
-    NVIC_EnableIRQ(ADC0_INT_IRQn);
+    DL_DMA_enableInterrupt(
+        DMA,
+        DL_DMA_INTERRUPT_CHANNEL0
+    );
+
+    NVIC_EnableIRQ(DMA_INT_IRQn);
 
     // 7. Configure DMA channel.
     // The exact channel and trigger identifiers must match the
@@ -168,24 +172,28 @@ private:
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
 // ADC interrupt handler.
-extern "C" void ADC0_IRQHandler()
+extern "C" void DMA_IRQHandler(void)
 {
-  if (DL_ADC12_getPendingInterrupt(ADC0) ==
-      DL_ADC12_IIDX_DMA_DONE)
-  {
-    DL_ADC12_clearInterruptStatus(
-      ADC0, DL_ADC12_INTERRUPT_DMA_DONE
-    );
+    if (DL_DMA_getPendingInterrupt(DMA) ==
+        DL_DMA_EVENT_IIDX_DMACH0)
+    {
+        DL_DMA_clearInterruptStatus(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
+        );
 
-    BaseType_t higher_priority_task_woken = pdFALSE;
+        BaseType_t higher_priority_task_woken = pdFALSE;
 
-    vTaskNotifyGiveFromISR(
-      adc_waiting_task,
-      &higher_priority_task_woken
-    );
+        if (adc_waiting_task != nullptr)
+        {
+            vTaskNotifyGiveFromISR(
+                adc_waiting_task,
+                &higher_priority_task_woken
+            );
+        }
 
-    portYIELD_FROM_ISR(higher_priority_task_woken);
-  }
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
 }
 
 // ================================
@@ -333,44 +341,29 @@ void request_task(void*)
 
 void sampler_task(void*)
 {
-  // Create our ADC driver.
-  adc_driver adc;
+    adc_driver adc;
 
-  // Buffer for 64 raw ADC measurements.
-  std::array<std::uint16_t, samples_per_batch> raw_samples;
+    std::array<std::uint16_t, samples_per_batch> raw_samples;
+    temperature_batch temperatures;
 
-  // Buffer for 64 converted temperature measurements.
-  temperature_batch temperatures;
+    while (true)
+    {
+        xSemaphoreTake(sample_request, portMAX_DELAY);
 
-  const std::uint16_t calibration_code =
-      static_cast<std::uint16_t>(
-          DL_SYSCTL_getTempCalibrationConstant()
-      );
+        adc.read(raw_samples.data(), raw_samples.size());
 
-  while (true)
-  {
-      // 1. Wait until the display board requests measurements.
-      xSemaphoreTake(sample_request, portMAX_DELAY);
+        for (std::size_t i = 0; i < samples_per_batch; i++)
+        {
+            temperatures[i] =
+                convert_to_temperature(raw_samples[i]);
+        }
 
-      // 2. Collect 64 ADC samples using DMA.
-      // This call sleeps until the DMA interrupt finishes.
-      adc.read(raw_samples.data(), raw_samples.size());
-
-      // 3. Convert all 64 ADC samples into temperatures.
-      for (std::size_t i = 0; i < samples_per_batch; i++)
-      {
-          temperatures[i] =
-              convert_temperature(raw_samples[i], calibration_code);
-      }
-
-      // 4. Send the temperature batch to the queue.
-      // The queue makes its own copy of the array.
-      xQueueSend(
-          batch_queue,
-          &temperatures,
-          portMAX_DELAY
-      );
-  }
+        xQueueSend(
+            batch_queue,
+            &temperatures,
+            portMAX_DELAY
+        );
+    }
 }
 
 // TODO(lab, role 3): Construct a crc32_hardware and a lab1::input_pin for
