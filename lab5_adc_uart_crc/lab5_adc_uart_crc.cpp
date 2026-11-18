@@ -448,6 +448,7 @@ constexpr std::uint32_t task_stack_words = 512;
 StaticTask_t display_task_tcb;
 StackType_t display_task_stack[task_stack_words];
 
+
 // TODO(lab, role 4): Add a stack and TCB for each of the three sensor tasks.
 
 // This lab uses two boards playing different roles. Both roles live in this
@@ -469,6 +470,7 @@ enum class device_role : std::uint8_t
 constexpr device_role this_device = device_role::sensor;
 }  // namespace
 
+/*
 int main()
 {
   std::printf("Hello, World\n");
@@ -497,5 +499,29 @@ int main()
   // configSUPPORT_STATIC_ALLOCATION are already supplied by the freertos_kernel
   // project's dpl/StaticAllocs_freertos.c - don't redefine them here.
   while (true) {
-  }
+  }*/
+
+  //TESTING MAIN
+
+  int main()
+{
+    // Start the ADC test task.
+    xTaskCreateStatic(
+        adc_test_task,
+        "adc_test_task",
+        task_stack_words,
+        nullptr,
+        tskIDLE_PRIORITY + 1,
+        adc_test_task_stack,
+        &adc_test_task_tcb
+    );
+
+    // Start FreeRTOS.
+    vTaskStartScheduler();
+
+    while (true)
+    {
+    }
+
+    
 }
