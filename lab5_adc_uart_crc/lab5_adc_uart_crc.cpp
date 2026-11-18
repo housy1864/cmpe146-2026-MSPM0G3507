@@ -557,10 +557,57 @@ static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
 // 2. ADC test function
+
 void adc_test_task(void*)
 {
-    // Complete function above
+    std::printf("ADC CPU test started!\n");
+
+    adc_driver adc;
+
+    std::printf("ADC driver initialized!\n");
+
+    while (true)
+    {
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+        );
+
+        DL_ADC12_startConversion(ADC0);
+
+        std::printf("Waiting for ADC...\n");
+
+        uint32_t timeout = 1000000;
+
+        while (
+            (DL_ADC12_getRawInterruptStatus(
+                ADC0,
+                DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+            ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
+            && timeout > 0
+        )
+        {
+            timeout--;
+        }
+
+        if (timeout == 0)
+        {
+            std::printf("ADC TIMEOUT!\n");
+        }
+        else
+        {
+            uint16_t raw =
+                ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
+
+            std::printf("ADC SUCCESS: %u\n", raw);
+        }
+
+        DL_ADC12_stopConversion(ADC0);
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
+
 
 // 3. Main
 int main()
