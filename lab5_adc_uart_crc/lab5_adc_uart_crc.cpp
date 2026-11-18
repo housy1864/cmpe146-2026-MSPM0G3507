@@ -499,12 +499,6 @@ void display_task(void*)
 // overflows.
 constexpr std::uint32_t task_stack_words = 512;
 
-// Display board: one task.
-// ADC test task storage
-static StaticTask_t adc_test_task_tcb;
-static StackType_t adc_test_task_stack[task_stack_words];
-
-
 // TODO(lab, role 4): Add a stack and TCB for each of the three sensor tasks.
 
 // This lab uses two boards playing different roles. Both roles live in this
