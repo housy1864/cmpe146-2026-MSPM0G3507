@@ -59,6 +59,12 @@ public:
 
         DL_ADC12_setClockConfig(ADC0, &clock_config);
 
+        // Keep ADC powered between conversions.
+        DL_ADC12_setPowerDownMode(
+            ADC0,
+            DL_ADC12_POWER_DOWN_MODE_MANUAL
+        );
+
         // 3. Configure repeated, software-triggered, 12-bit conversions --P62
         DL_ADC12_initSingleSample(
             ADC0,
