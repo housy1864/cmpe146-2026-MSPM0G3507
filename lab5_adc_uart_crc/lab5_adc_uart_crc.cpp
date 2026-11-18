@@ -44,7 +44,7 @@ public:
     adc_driver()
     {
         // 1. Reset and power up ADC0.
-        DL_ADC12_reset(ADC0);
+        DL_ADC12_reset(ADC0); 
         DL_ADC12_enablePower(ADC0);
 
         // Allow the ADC peripheral to power up.
@@ -52,14 +52,14 @@ public:
 
         // 2. Configure ADC clock: SYSOSC, 24-32 MHz, divide by 1.
         static const DL_ADC12_ClockConfig clock_config = {
-            .clockSel = DL_ADC12_CLOCK_SYSOSC,
-            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
-            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1,
+            .clockSel = DL_ADC12_CLOCK_SYSOSC, //set clock source
+            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32, //set freq range
+            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1, 
         };
 
         DL_ADC12_setClockConfig(ADC0, &clock_config);
 
-        // 3. Configure repeated, software-triggered, 12-bit conversions.
+        // 3. Configure repeated, software-triggered, 12-bit conversions --P62
         DL_ADC12_initSingleSample(
             ADC0,
             DL_ADC12_REPEAT_MODE_ENABLED,
@@ -108,16 +108,16 @@ public:
 
         NVIC_EnableIRQ(ADC0_INT_IRQn);
 
-        // 7. Configure DMA channel 0.
+        // 7. Configure DMA channel 0 -- P56
         static const DL_DMA_Config dma_config = {
-            .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
-            .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
-            .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
-            .extendedMode = DL_DMA_NORMAL_MODE,
-            .srcWidth = DL_DMA_WIDTH_HALF_WORD,
-            .destWidth = DL_DMA_WIDTH_HALF_WORD,
-            .srcIncrement = DL_DMA_ADDR_UNCHANGED,
-            .destIncrement = DL_DMA_ADDR_INCREMENT,
+            .trigger = DMA_ADC0_EVT_GEN_BD_TRIG, //trigger source when adc says ready
+            .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL, //wait for outside hardware
+            .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE, //one result one time
+            .extendedMode = DL_DMA_NORMAL_MODE, //normal mode
+            .srcWidth = DL_DMA_WIDTH_HALF_WORD, //r16
+            .destWidth = DL_DMA_WIDTH_HALF_WORD, //w16
+            .srcIncrement = DL_DMA_ADDR_UNCHANGED, //r from same source
+            .destIncrement = DL_DMA_ADDR_INCREMENT, //move with array
         };
 
         DL_DMA_initChannel(
@@ -136,7 +136,7 @@ public:
             )
         );
 
-        // 8. Enable ADC conversions.
+        // 8. Enable ADC conversions, can be done eariler as well.
         DL_ADC12_enableConversions(ADC0);
     }
 
