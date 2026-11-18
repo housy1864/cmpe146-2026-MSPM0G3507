@@ -587,28 +587,6 @@ void adc_test_task(void*)
     }
 }*/
 
-int main()
-{
-  // Start the ADC test task.
-  xTaskCreateStatic(
-      adc_test_task,
-      "adc_test_task",
-      task_stack_words,
-      nullptr,
-      tskIDLE_PRIORITY + 1,
-      adc_test_task_stack,
-      &adc_test_task_tcb
-  );
-
-    // Start FreeRTOS.
-    vTaskStartScheduler();
-
-    while (true)
-    {
-    }
-    
-  }
-
 void adc_test_task(void*)
 {
     std::printf("ADC CPU test started!\n");
@@ -644,5 +622,27 @@ void adc_test_task(void*)
         std::printf("Raw ADC result: %u\n", raw);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+
+int main()
+{
+  // Start the ADC test task.
+  xTaskCreateStatic(
+      adc_test_task,
+      "adc_test_task",
+      task_stack_words,
+      nullptr,
+      tskIDLE_PRIORITY + 1,
+      adc_test_task_stack,
+      &adc_test_task_tcb
+  );
+
+    // Start FreeRTOS.
+    vTaskStartScheduler();
+
+    while (true)
+    {
     }
-}
+    
+  }
+
