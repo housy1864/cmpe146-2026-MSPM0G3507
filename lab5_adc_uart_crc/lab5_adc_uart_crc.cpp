@@ -153,8 +153,8 @@ private:
     // Convert 12-bit values to the 16-bit interface format.
     for (size_t i = 0; i < length; i++)
     {
-      std::uint16_t value = std::sample & 0x0FFF;
-      sample = static_cast<std::uint16_t>(
+      std::uint16_t value = buffer[i] & 0x0FFF;
+      buffer[i] = static_cast<std::uint16_t>(
         (value << 4) | (value >> 8)
       );
     }
@@ -354,7 +354,7 @@ void sampler_task(void*)
 
       // 2. Collect 64 ADC samples using DMA.
       // This call sleeps until the DMA interrupt finishes.
-      adc.read(samples.data(), samples.size());
+      adc.read(raw_samples.data(), raw_samples.size());
 
       // 3. Convert all 64 ADC samples into temperatures.
       for (std::size_t i = 0; i < samples_per_batch; i++)
