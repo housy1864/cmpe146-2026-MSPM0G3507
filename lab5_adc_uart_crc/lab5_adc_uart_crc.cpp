@@ -519,7 +519,7 @@ void adc_test_task(void*)
     {
         std::printf("Starting ADC read...\n");
 
-        adc.read(samples.data(), samples.size());
+        adc.read(samples);
 
         std::printf("ADC read completed!\n");
 
