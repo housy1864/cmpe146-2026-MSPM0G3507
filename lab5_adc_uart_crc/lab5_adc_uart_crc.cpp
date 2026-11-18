@@ -329,7 +329,38 @@ void request_task(void*)
 //   4. xQueueSend(batch_queue, &batch, portMAX_DELAY)
 void sampler_task(void*)
 {
-  while (true) {
+  // Create our ADC driver.
+  adc_driver adc;
+
+  // Buffer for 64 raw ADC measurements.
+  std::array<std::uint16_t, samples_per_batch> raw_samples;
+
+  // Buffer for 64 converted temperature measurements.
+  temperature_batch temperatures;
+
+  while (true)
+  {
+      // 1. Wait until the display board requests measurements.
+      xSemaphoreTake(sample_request, portMAX_DELAY);
+
+      // 2. Collect 64 ADC samples using DMA.
+      // This call sleeps until the DMA interrupt finishes.
+      adc.read(raw_samples);
+
+      // 3. Convert all 64 ADC samples into temperatures.
+      for (std::size_t i = 0; i < samples_per_batch; i++)
+      {
+          temperatures[i] =
+              convert_to_temperature(raw_samples[i]);
+      }
+
+      // 4. Send the temperature batch to the queue.
+      // The queue makes its own copy of the array.
+      xQueueSend(
+          batch_queue,
+          &temperatures,
+          portMAX_DELAY
+      );
   }
 }
 
