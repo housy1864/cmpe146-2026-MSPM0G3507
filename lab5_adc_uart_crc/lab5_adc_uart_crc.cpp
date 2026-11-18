@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
-#include <cmath>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -32,225 +31,15 @@
 //     task's handle, start the conversion, then sleep with ulTaskNotifyTake()
 //     until ADC0_IRQHandler() wakes you. Upscale each 12-bit sample to 16 bits
 //     before returning.
-
-// The task that is currently waiting for the ADC/DMA transfer.
-// ADC task waiting for the DMA-completion interrupt.
-static TaskHandle_t adc_waiting_task = nullptr;
-
-static constexpr uint8_t adc_dma_channel = 0;
-
-class adc_driver : public lab5::adc16_stream
-{
-public:
-    adc_driver()
-    {
-        // 1. Reset and power ADC0.
-        DL_ADC12_reset(ADC0);
-        DL_ADC12_enablePower(ADC0);
-        delay_cycles(16000);
-
-        // 2. Configure ADC clock to use SYSOSC.
-        static const DL_ADC12_ClockConfig clock_config = {
-            .clockSel = DL_ADC12_CLOCK_SYSOSC,
-            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
-            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1,
-        };
-
-        DL_ADC12_setClockConfig(ADC0, &clock_config);
-
-        // 3. Configure repeated, software-triggered, 12-bit conversions.
-        DL_ADC12_initSingleSample(
-            ADC0,
-            DL_ADC12_REPEAT_MODE_ENABLED,
-            DL_ADC12_SAMPLING_SOURCE_MANUAL,
-            DL_ADC12_TRIG_SRC_SOFTWARE,
-            DL_ADC12_SAMP_CONV_RES_12_BIT,
-            DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED
-        );
-
-        // 4. Configure MEM0 to read the internal temperature sensor.
-        DL_ADC12_configConversionMem(
-            ADC0,
-            DL_ADC12_MEM_IDX_0,
-            DL_ADC12_INPUT_CHAN_11,
-            DL_ADC12_REFERENCE_VOLTAGE_VDDA,
-            DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
-            DL_ADC12_AVERAGING_MODE_DISABLED,
-            DL_ADC12_BURN_OUT_SOURCE_DISABLED,
-            DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
-            DL_ADC12_WINDOWS_COMP_MODE_DISABLED
-        );
-
-        // 5. Configure the sample time.
-        // Confirm this value represents >= 12.5 us with the configured ADC clock.
-        DL_ADC12_setSampleTime0(ADC0, 400);
-
-        // 6. Configure DMA completion interrupt.
-        DL_ADC12_setDMASamplesCnt(ADC0, 1);
-        DL_ADC12_enableDMATrigger(
-            ADC0,
-            DL_ADC12_DMA_MEM0_RESULT_LOADED
-        );
-
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        DL_ADC12_enableInterrupt(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        NVIC_EnableIRQ(ADC0_INT_IRQn);
-
-        // 7. Configure DMA channel 0.
-        static const DL_DMA_Config dma_config = {
-            .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
-            .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
-            .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
-            .extendedMode = DL_DMA_NORMAL_MODE,
-            .srcWidth = DL_DMA_WIDTH_HALF_WORD,
-            .destWidth = DL_DMA_WIDTH_HALF_WORD,
-            .srcIncrement = DL_DMA_ADDR_UNCHANGED,
-            .destIncrement = DL_DMA_ADDR_INCREMENT,
-        };
-
-        DL_DMA_initChannel(
-            DMA,
-            adc_dma_channel,
-            &dma_config
-        );
-
-        // ADC MEM0 result register is the fixed DMA source.
-        DL_DMA_setSrcAddr(
-            DMA,
-            adc_dma_channel,
-            DL_ADC12_getMemResultAddress(
-                ADC0,
-                DL_ADC12_MEM_IDX_0
-            )
-        );
-
-        // 8. Enable ADC conversions.
-        DL_ADC12_enableConversions(ADC0);
-    }
-
-private:
-    // Convert 12 bits into 16 bits by repeating the most significant
-    // four bits in the lower four positions.
-    static uint16_t upscale_12_to_16(uint16_t value)
-    {
-        return static_cast<uint16_t>(
-            (value << 4) | (value >> 8)
-        );
-    }
-
-void driver_read(uint16_t* buffer, size_t length) override
-{
-    if (length == 0) {
-        return;
-    }
-
-    DL_DMA_disableChannel(DMA, adc_dma_channel);
-
-    DL_DMA_setDestAddr(
-        DMA,
-        adc_dma_channel,
-        static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(buffer)
-        )
-    );
-
-    DL_DMA_setTransferSize(
-        DMA,
-        adc_dma_channel,
-        static_cast<uint16_t>(length)
-    );
-
-    ulTaskNotifyTake(pdTRUE, 0);
-
-    DL_ADC12_clearInterruptStatus(
-        ADC0,
-        DL_ADC12_INTERRUPT_DMA_DONE
-    );
-
-    adc_waiting_task = xTaskGetCurrentTaskHandle();
-
-    DL_DMA_enableChannel(DMA, adc_dma_channel);
-    DL_ADC12_enableDMA(ADC0);
-    DL_ADC12_startConversion(ADC0);
-
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-    DL_ADC12_stopConversion(ADC0);
-    DL_ADC12_disableDMA(ADC0);
-    DL_DMA_disableChannel(DMA, adc_dma_channel);
-
-    adc_waiting_task = nullptr;
-
-    for (size_t i = 0; i < length; i++) {
-        buffer[i] = (buffer[i] << 4) | (buffer[i] >> 8);
-    }
-}
-};
-
-
+class adc_driver
+{};
 
 // TODO(lab, role 1): Store the handle of the task waiting in
 // adc_driver::driver_read() somewhere this handler can reach. When
 // DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
-
 extern "C" void ADC0_IRQHandler()
-{
-    if (DL_ADC12_getPendingInterrupt(ADC0) ==
-        DL_ADC12_IIDX_DMA_DONE)
-    {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        BaseType_t higher_priority_task_woken = pdFALSE;
-
-        if (adc_waiting_task != nullptr) {
-            vTaskNotifyGiveFromISR(
-                adc_waiting_task,
-                &higher_priority_task_woken
-            );
-        }
-
-        portYIELD_FROM_ISR(higher_priority_task_woken);
-    }
-}
-
-// ================================
-// Temperature Conversion Function
-// ================================
-using temperature_sample_t = std::int16_t;
-
-static temperature_sample_t convert_temperature(
-    std::uint16_t raw_sample,
-    std::uint16_t calibration_code)
-{
-    // Convert the upscaled 16-bit sample back to a 12-bit ADC code.
-    const double sample_code = raw_sample >> 4;
-
-    // Convert the ADC code difference into voltage.
-    const double voltage_difference =
-        (sample_code - calibration_code) * 3.3 / 4096.0;
-
-    // Temperature sensor slope is -1.8 mV per degree Celsius.
-    const double temperature =
-        30.0 + voltage_difference / -0.0018;
-
-    // Store temperature in units of 0.1 degrees Celsius.
-    return static_cast<temperature_sample_t>(
-        std::lround(temperature * 10.0)
-    );
-}
-
+{}
 
 // =============================================================================
 // Role 2: UART
@@ -329,6 +118,7 @@ constexpr std::size_t samples_per_batch = 64;
 // resolves at least 0.5 degC. A fixed-point scheme (e.g. int16_t in units of
 // 0.1 degC) or a float both work. Both boards must use the same encoding and
 // byte order.
+using temperature_sample_t = std::int16_t;
 
 // One batch of converted samples. This is the item type of batch_queue.
 using temperature_batch = std::array<temperature_sample_t, samples_per_batch>;
@@ -371,42 +161,10 @@ void request_task(void*)
 //   3. Convert each raw sample into a temperature_batch. See "Temperature
 //      conversion" in the README for the calibration constants.
 //   4. xQueueSend(batch_queue, &batch, portMAX_DELAY)
-
 void sampler_task(void*)
 {
-    adc_driver adc;
-
-    std::array<std::uint16_t, samples_per_batch> raw_samples;
-    temperature_batch temperatures;
-
-    // Factory calibration value at 30 degrees Celsius.
-    const std::uint16_t calibration_code =
-        DL_SYSCTL_getTempCalibrationConstant();
-
-    while (true)
-    {
-        // 1. Wait until the UART request task signals us.
-        xSemaphoreTake(sample_request, portMAX_DELAY);
-
-        // 2. Read all 64 samples in ONE DMA transfer.
-        adc.read(raw_samples.data(), raw_samples.size());
-
-        // 3. Convert each ADC reading into temperature.
-        for (std::size_t i = 0; i < samples_per_batch; i++)
-        {
-            temperatures[i] = convert_temperature(
-                raw_samples[i],
-                calibration_code
-            );
-        }
-
-        // 4. Send the completed batch to the transmit task.
-        xQueueSend(
-            batch_queue,
-            &temperatures,
-            portMAX_DELAY
-        );
-    }
+  while (true) {
+  }
 }
 
 // TODO(lab, role 3): Construct a crc32_hardware and a lab1::input_pin for
@@ -478,37 +236,29 @@ enum class device_role : std::uint8_t
   display,
 };
 
-//constexpr device_role this_device = device_role::sensor;
-
+constexpr device_role this_device = device_role::sensor;
 }  // namespace
-
-// ADC-only test task storage.
-static StaticTask_t adc_test_task_tcb;
-static StackType_t adc_test_task_stack[task_stack_words];
-
-void adc_test_task(void*);
 
 int main()
 {
-
   std::printf("Hello, World\n");
 
+  if constexpr (this_device == device_role::sensor) {
     // TODO(lab, role 4): Before the scheduler starts:
     //   1. Create sample_request and batch_queue.
     //   2. Create request_task, sampler_task, and transmit_task with
     //      xTaskCreateStatic().
     // request_task and transmit_task share one serial_driver. main()'s stack
     // is reused once the scheduler starts, so don't make it a local here.
-
-  xTaskCreateStatic(
-      adc_test_task,
-      "adc_test_task",
-      task_stack_words,
-      nullptr,
-      tskIDLE_PRIORITY + 1,
-      adc_test_task_stack,
-      &adc_test_task_tcb
-  );
+  } else {
+    xTaskCreateStatic(display_task,
+                      "display_task",
+                      task_stack_words,
+                      nullptr,
+                      tskIDLE_PRIORITY + 1,
+                      display_task_stack,
+                      &display_task_tcb);
+  }
 
   vTaskStartScheduler();
 
@@ -518,38 +268,4 @@ int main()
   // project's dpl/StaticAllocs_freertos.c - don't redefine them here.
   while (true) {
   }
-}
-
-//======================================================================
-// TESTING
-//======================================================================
-void adc_test_task(void*)
-{
-    std::printf("ADC test task started!\n");
-
-    std::printf("Creating ADC driver...\n");
-    adc_driver adc;
-    std::printf("ADC driver initialized!\n");
-
-    std::array<std::uint16_t, 64> samples{};
-
-    while (true)
-    {
-        std::printf("Starting ADC read...\n");
-
-        adc.read(samples.data(), samples.size());
-
-        std::printf("ADC read completed!\n");
-
-        for (std::size_t i = 0; i < samples.size(); i++)
-        {
-            std::printf("Sample %u: %u\n",
-                static_cast<unsigned>(i),
-                static_cast<unsigned>(samples[i]));
-        }
-
-        std::printf("ADC batch complete!\n");
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
 }
