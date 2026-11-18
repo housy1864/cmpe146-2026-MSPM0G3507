@@ -248,24 +248,19 @@ private:
 
 extern "C" void ADC0_IRQHandler()
 {
-    DL_ADC12_IIDX pending =
-        DL_ADC12_getPendingInterrupt(ADC0);
-
-    if (pending == DL_ADC12_IIDX_MEM0_RESULT_LOADED)
+    // Diagnostic: clear the ADC result-loaded interrupt.
+    if (DL_ADC12_getRawInterruptStatus(
+            ADC0, DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED))
     {
-        // A conversion result has been loaded into MEM0.
-        volatile uint16_t result =
-            DL_ADC12_getMemResult(ADC0, DL_ADC12_MEM_IDX_0);
-
         DL_ADC12_clearInterruptStatus(
             ADC0,
             DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
         );
-
-        return;
     }
 
-    if (pending == DL_ADC12_IIDX_DMA_DONE)
+    // Check DMA_DONE independently of the MEM0 interrupt.
+    if (DL_ADC12_getRawInterruptStatus(
+            ADC0, DL_ADC12_INTERRUPT_DMA_DONE))
     {
         DL_ADC12_clearInterruptStatus(
             ADC0,
@@ -274,10 +269,13 @@ extern "C" void ADC0_IRQHandler()
 
         BaseType_t higher_priority_task_woken = pdFALSE;
 
-        vTaskNotifyGiveFromISR(
-            adc_waiting_task,
-            &higher_priority_task_woken
-        );
+        if (adc_waiting_task != nullptr)
+        {
+            vTaskNotifyGiveFromISR(
+                adc_waiting_task,
+                &higher_priority_task_woken
+            );
+        }
 
         portYIELD_FROM_ISR(higher_priority_task_woken);
     }
