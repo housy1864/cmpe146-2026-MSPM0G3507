@@ -109,6 +109,11 @@ public:
             DL_ADC12_INTERRUPT_DMA_DONE
         );
 
+        DL_ADC12_enableInterrupt(
+          ADC0,
+          DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+        );
+
         NVIC_EnableIRQ(ADC0_INT_IRQn);
 
         // 7. Configure DMA channel 0.
