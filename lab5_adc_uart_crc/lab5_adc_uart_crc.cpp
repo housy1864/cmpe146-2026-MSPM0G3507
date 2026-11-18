@@ -59,8 +59,9 @@ class uart_serial_driver : public lab6::serial
 { // Overview Page: 1,242
 private:
   static constexpr std::size_t receive_buffer_size = 256;
-  static inline std::array<std::uint8_t, receive_buffer_size> receive_storage{};
-  static inline volatile std::size_t receive_write_cursor = 0;
+  static inline std::array<std::uint8_t, receive_buffer_size> receive_storage{}; // Used to store data at cursor location.
+  static inline volatile std::size_t receive_write_cursor = 0; 
+  // The cursor is used to find the next valid received byte.
 
   // UART1 uses PA8 for TX and PA9 for RX on the LaunchPad diagram.
   // PINCM19 and PINCM20 are entries 18 and 19 in the PINCM array.
@@ -216,21 +217,21 @@ public:
       case IIDX_RXIFG:
       // A receive-timeout interrupt also means received data may remain in the FIFO.
       case IIDX_RTFG:
-        // Continue until every byte currently waiting in the RX FIFO is processed.
+        // Processes as long as a byte is available in the queue to process.
         while ((*uart_reg(UART1_STAT) & STAT_RXFE) == 0U) {
-          // Read the received byte and any error flags attached to that byte.
+          // Received is the byte received during UART transfer from TX to RX.
           std::uint32_t const received = *uart_reg(UART1_RXDATA);
           // Combine all UART receive-error bits into one mask for validation.
           constexpr std::uint32_t error_mask =
             RXDATA_FRMERR | RXDATA_PARERR | RXDATA_BRKERR | RXDATA_OVRERR;
-          // Store only bytes that were received without a UART-level error.
+          // Checks to see if error is not received. Otherwise, breaks interrupt
           if ((received & error_mask) == 0U) {
-            // Keep only the 8-bit data field and write it at the current cursor.
             receive_storage[receive_write_cursor] =
-              static_cast<std::uint8_t>(received & RXDATA_MASK);
+              static_cast<std::uint8_t>(received & RXDATA_MASK); // Cursor receives an arriving byte.
             // Advance the cursor and wrap it to zero at the buffer boundary.
             receive_write_cursor =
-              (receive_write_cursor + 1U) % receive_buffer_size;
+              (receive_write_cursor + 1U) % receive_buffer_size; 
+              // Cursor updated according to current position and buffer size
           }
         }
         // RXDATA reads acknowledge the received bytes and leave the handler.
@@ -266,7 +267,8 @@ private:
     // until the driver grows a configurable clock-source selection.
     constexpr std::uint32_t uart_clock_hz = 32'000'000U;
     constexpr std::uint32_t oversampling = 16U;
-
+    // Oversampling being 16 means that each bit period is divided into 16 sample intervals
+    // Supported oversampling rates: TRM Pg. 1243
     if (p_settings.baud_rate == 0U) {
       return false;
     }
@@ -282,7 +284,8 @@ private:
       the baud rate desired for the UART connection.
 
     */
-    // Oversampling: Pg. 1,247. Baud rate generation: Pg. 1,248
+    // OVERSAMPLING Photo: Pg. 1,247. BAUD RATE Generation Equation: Pg. 1,248
+    // Division by 64 after multiplying by 64 used to maintain integers during calculation.
     std::uint32_t const divisor_x64 =
       (uart_clock_hz * 64U + (oversampling * p_settings.baud_rate) / 2U) /
       (oversampling * p_settings.baud_rate);
@@ -293,7 +296,7 @@ private:
     if (integer_divisor == 0U ||
         integer_divisor > std::numeric_limits<std::uint16_t>::max()) {
       return false;
-    } // Numeric Limits has limits of a numertic tyoe.
+    } // Numeric Limits has limits of a numeric type.
 
     std::uint32_t parity = 0U; // Chooses parity bit check to catch errors when transmission is unexpected.
     switch (p_settings.parity) {
@@ -335,27 +338,31 @@ private:
     *uart_reg(UART1_LCRH) = LCRH_WLEN8 | parity |
                   (p_settings.stop == settings::stop_bits::two
                      ? LCRH_STP2
-                     : 0U);         // 1 Byte(8 bit) transfers, no parity selected, default
-                                    // 1 stop bit.
+                     : 0U);         // Line control register: 
+                                    // 1 Byte(8 bit) transfers, parity chosen,
+                                    // default 1 stop bit.
     *uart_reg(UART1_IBRD) = integer_divisor; // For Baud Rate Calculation, integer divider used
                                              // to attain 115,200.
-    *uart_reg(UART1_FBRD) = fractional_divisor; // For Baud Rate Calculation, fraction divider
+    *uart_reg(UART1_FBRD) = fractional_divisor; // For Baud Rate Calculation, fractional divider
                                                 // used to attain 115,200.
 
     // The UART requires an LCRH(Line control register) write after changing IBRD/FBRD.  Rewriting
-    // the complete line-control value also makes the ordering explicit.
+    // the complete line-control value also makes the ordering explicit. This is because
+    // the divisors are not yet loaded to the Baud Rate Generator, and will be after being called.
     *uart_reg(UART1_LCRH) = LCRH_WLEN8 | parity |
                   (p_settings.stop == settings::stop_bits::two
                      ? LCRH_STP2
                      : 0U);
-    *uart_reg(UART1_CTL0) |= CTL0_ENABLE;                  // Enables UART control register 0.
+    *uart_reg(UART1_CTL0) |= CTL0_ENABLE; // Enables UART control register 0. It takes the
+                                          // Previous TX/RX and FIFO enabling and adds the enable
+                                          // Bit for the UART control.
 
     *uart_reg(UART1_IFLS) = (*uart_reg(UART1_IFLS) & ~IFLS_RX_MASK) |
                             IFLS_RX_LEVEL_1; // Interrupt FIFO Level-Select
     *uart_reg(UART1_IMASK) = INT_RX | INT_FRMERR | INT_PARERR |
                              INT_BRKERR | INT_OVRERR; // Errors enabled for framing, parity,
                                                       // breaks, and overrun.
-    *reg(NVIC_ISER0) = (1U << 13U);
+    *reg(NVIC_ISER0) = (1U << 13U); // Used to enable NVIC Interrupt.
     return true;
   }
 
@@ -372,12 +379,12 @@ private:
   {
     return std::span<std::uint8_t const>(
       receive_storage.data(), receive_storage.size());
-  }
+  } // Returns the received storage information as a span.
 
   std::size_t driver_receive_cursor() override
   {
     return receive_write_cursor;
-  }
+  } // Returns the current cursor
 };
 
 extern "C" void UART1_IRQHandler()
