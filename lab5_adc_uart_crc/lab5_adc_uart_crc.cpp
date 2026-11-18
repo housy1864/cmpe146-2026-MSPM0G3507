@@ -141,7 +141,7 @@ private:
     // Save the task before starting the conversion.
     adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-    DL_DMA_enableChannel(DMA, DL_DMA_CHAN_ID_0);
+    DL_DMA_enableChannel(DMA, adc_dma_channel);
     DL_ADC12_enableDMA(ADC0);
 
     DL_ADC12_startConversion(ADC0);
