@@ -389,10 +389,7 @@ void sampler_task(void*)
         xSemaphoreTake(sample_request, portMAX_DELAY);
 
         // 2. Read all 64 samples in ONE DMA transfer.
-        adc.read(std::span<std::uint16_t>(
-            raw_samples.data(),
-            raw_samples.size()
-        ));
+        adc.read(raw_samples.data(), raw_samples.size());
 
         // 3. Convert each ADC reading into temperature.
         for (std::size_t i = 0; i < samples_per_batch; i++)
@@ -410,7 +407,6 @@ void sampler_task(void*)
             portMAX_DELAY
         );
     }
-}}
 }
 
 // TODO(lab, role 3): Construct a crc32_hardware and a lab1::input_pin for
@@ -483,10 +479,10 @@ enum class device_role : std::uint8_t
 };
 
 //constexpr device_role this_device = device_role::sensor;
+
 }  // namespace
 
-//constexpr (this_device == device_role::sensor)
-
+// ADC-only test task storage.
 static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
@@ -542,12 +538,6 @@ void adc_test_task(void*)
         std::printf("Starting ADC read...\n");
 
         adc.read(samples.data(), samples.size());
-
-        if (!adc_read_success) {
-            std::printf("ADC transfer failed\n");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
 
         std::printf("ADC read completed!\n");
 
