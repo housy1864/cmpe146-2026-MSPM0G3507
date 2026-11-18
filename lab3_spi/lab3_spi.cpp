@@ -192,12 +192,12 @@ public:
   mspm0g_spi()
   {
     mspm0g::mmio(mspm0g::gpiob_pwren) =
-        mspm0g::power_key | mspm0g::power_enable; // Turns SPI pin on.
+        mspm0g::power_key | mspm0g::power_enable; // Turns GPIOB peripheral on. Page 672
     mspm0g::mmio(mspm0g::spi1_rstctl) =
         mspm0g::reset_key | mspm0g::reset_sticky_clear |
-        mspm0g::reset_assert; // Resets the SPI pin.
+        mspm0g::reset_assert; // Resets the SPI pin. Pages 673 
     mspm0g::mmio(mspm0g::spi1_pwren) =
-        mspm0g::power_key | mspm0g::power_enable; // Enables 
+        mspm0g::power_key | mspm0g::power_enable; // Enables SPI peripheral pin control, attached to the GPIOB pin. Page 1433
     for (volatile std::uint32_t i = 0;
          i < peripheral_power_wait_cycles;
          ++i) {
@@ -251,7 +251,7 @@ private:
                               mspm0g::spi_ctl0_spo_high |
                               mspm0g::spi_ctl0_sph_second;
         case mode::m0: return mspm0g::spi_ctl0_motorola_4wire;
-      }
+      } // Pages 1465, 66. CTL0 is used for the format of sending signals and the size of data.
       return mspm0g::spi_ctl0_motorola_4wire;
     }();
 
@@ -353,18 +353,20 @@ public:
   // 2. Reads and prints the manufacturing ID.
   std::array<std::uint8_t, 3> read_jedec_id()
   {
-    const std::array<std::uint8_t, 4> command = {
-      w25q_read_jedec_id, 0xFF, 0xFF, 0xFF}; // 0xFF is a default value.
-    std::array<std::uint8_t, 4> response{};
+    const std::array<std::uint8_t, 1> command = {
+      w25q_read_jedec_id}; // 0xFF is a default value.
+    std::array<std::uint8_t, 3> response{};
 
     std::printf("JEDEC TX: %02X %02X %02X %02X\n",
                 command[0], command[1], command[2], command[3]);
     transfer(command, response);
-
+    // cs
+    m_spi->transfer(command, {});
+    m_spi->transfer({}, response);
     std::printf("JEDEC RX: %02X %02X %02X %02X\n",
                 response[0], response[1], response[2], response[3]);
 
-    return {response[1], response[2], response[3]}; // This represents the 3 byte JEDEC ID.
+    return {response[0], response[1], response[2]}; // This represents the 3 byte JEDEC ID.
   }
   // 2. Reads and prints the memory capacity
   // Reads JEDEC ID, determines the flash size from it.
@@ -382,8 +384,7 @@ public:
   void read_block(std::span<std::uint8_t> p_data)
   {
     const std::size_t count = p_data.size(); // # of bytes to read
-    std::array<std::uint8_t, 4 + block_size> command{}; // Flash command build
-    std::array<std::uint8_t, 4 + block_size> response{}; // Flash responds and sends data
+    std::array<std::uint8_t, 4> command{}; // Flash command build
     // Command array represents a flash command. One command byte to read,
     // 3 bytes for an address. Also read as 24-bit(3-Byte).
     // 3. Block Read
@@ -391,10 +392,8 @@ public:
     command[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte 1
     command[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 2
     command[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte 3
-    transfer(std::span<std::uint8_t const>(command.data(), 4 + count),
-             std::span<std::uint8_t>(response.data(), 4 + count)); // Microcontroller requests data from SPI, SPI
+    transfer(command, p_data); // Microcontroller requests data from SPI, SPI
                                                                   // responds to microcontroller command read with data response.
-    std::memcpy(p_data.data(), response.data() + 4, count); // Copies from SPI buffer to controller buffer
   }
   // 4. Used for writing data to the flash
   bool write_block(std::span<std::uint8_t const> p_data)
@@ -421,15 +420,15 @@ public:
     if (!write_enable()) { // Calls the write_enable command for the NOR flash chip before writing any data
       return false;
     }
+    // TO-DO: ELIMINATE ADDITIONAL BLOCK SIZE BUFFERS AND USE SPANS DIRECTLY
     // 4. Block Write
     std::array<std::uint8_t, 4 + block_size> program{};
     program[0] = w25q_page_program; // Starts at a 24bit(3-Byte) address
     program[1] = static_cast<std::uint8_t>(first_block_address >> 16);  // Address Byte
     program[2] = static_cast<std::uint8_t>(first_block_address >> 8);   // Address Byte 3
     program[3] = static_cast<std::uint8_t>(first_block_address);        // Address Byte 3
-    std::memcpy(program.data() + 4, p_data.data(), count);// Start from page program, copies
-                                                          // bytes from microcontroller to flash chip
-    command(std::span<std::uint8_t const>(program.data(), 4 + count));
+    transfer(command, p_data); // Microcontroller requests data from SPI, SPI
+    // responds to microcontroller command read with data response.
     return wait_until_ready();
   }
 
