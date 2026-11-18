@@ -35,6 +35,7 @@
 
 // The task that is currently waiting for the ADC/DMA transfer.
 static TaskHandle_t adc_waiting_task = nullptr;
+static constexpr uint8_t adc_dma_channel = 0;
 
 class adc_driver : public lab5::adc16_stream
 {
@@ -97,7 +98,7 @@ public:
     DL_DMA_Config dma_config = {
       .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
       .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
-      .transferMode = DL_DMA_SINGLE_TRANSFER_MODE,
+      .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
       .extendedMode = DL_DMA_NORMAL_MODE,
       .srcWidth = DL_DMA_WIDTH_HALF_WORD,
       .destWidth = DL_DMA_WIDTH_HALF_WORD,
@@ -105,11 +106,11 @@ public:
       .destIncrement = DL_DMA_ADDR_INCREMENT
     };
 
-    DL_DMA_initChannel(DMA, DMA_CH0_CHAN_ID, &dma_config);
+    DL_DMA_initChannel(DMA, DL_DMA_CHAN_ID_0, &dma_config);
 
     DL_DMA_setSrcAddr(
       DMA,
-      DMA_CH0_CHAN_ID,
+      DL_DMA_CHAN_ID_0,
       DL_ADC12_getMemResultAddress(ADC0, DL_ADC12_MEM_IDX_0)
     );
 
@@ -122,24 +123,24 @@ private:
     if (buffer.empty()) return;
 
     // Prepare DMA for this buffer.
-    DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
+    DL_DMA_disableChannel(DMA, DL_DMA_CHAN_ID_0);
 
     DL_DMA_setDestAddr(
       DMA,
-      DMA_CH0_CHAN_ID,
+      DL_DMA_CHAN_ID_0,
       reinterpret_cast<std::uint32_t>(buffer.data())
     );
 
     DL_DMA_setTransferSize(
       DMA,
-      DMA_CH0_CHAN_ID,
+      DL_DMA_CHAN_ID_0,
       static_cast<std::uint16_t>(buffer.size())
     );
 
     // Save the task before starting the conversion.
     adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-    DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
+    DL_DMA_enableChannel(DMA, DL_DMA_CHAN_ID_0);
     DL_ADC12_enableDMA(ADC0);
 
     DL_ADC12_startConversion(ADC0);
@@ -190,6 +191,8 @@ extern "C" void ADC0_IRQHandler()
 // ================================
 // Temperature Conversion Function
 // ================================
+using temperature_sample_t = std::int16_t;
+
 static temperature_sample_t convert_temperature(
   std::uint16_t raw_sample,
   std::uint16_t calibration_code)
@@ -285,7 +288,6 @@ constexpr std::size_t samples_per_batch = 64;
 // resolves at least 0.5 degC. A fixed-point scheme (e.g. int16_t in units of
 // 0.1 degC) or a float both work. Both boards must use the same encoding and
 // byte order.
-using temperature_sample_t = std::int16_t;
 
 // One batch of converted samples. This is the item type of batch_queue.
 using temperature_batch = std::array<temperature_sample_t, samples_per_batch>;
@@ -352,7 +354,7 @@ void sampler_task(void*)
       for (std::size_t i = 0; i < samples_per_batch; i++)
       {
           temperatures[i] =
-              convert_to_temperature(raw_samples[i]);
+              convert_temperature(raw_samples[i]);
       }
 
       // 4. Send the temperature batch to the queue.
@@ -494,13 +496,6 @@ void adc_test_task(void*)
         std::printf("Starting ADC read...\n");
 
         adc.read(samples);
-
-        if (!adc_read_success)
-        {
-          std::printf("ADC read failed. Skipping samples.\n");
-          vTaskDelay(pdMS_TO_TICKS(2000));
-          continue;
-        }
 
         std::printf("ADC read completed!\n");
 
