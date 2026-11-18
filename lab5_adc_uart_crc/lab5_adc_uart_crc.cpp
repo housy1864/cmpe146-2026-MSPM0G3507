@@ -2,11 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
-#include <type_traits>
 #include <cmath>
 #include <cstring>
-#include <span>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -111,7 +110,7 @@ public:
 
         NVIC_EnableIRQ(ADC0_INT_IRQn);
 
-        // 7. Configure DMA channel 0.
+        // 7. Configure the DMA basic channel routed to ADC0.
         static const DL_DMA_Config dma_config = {
             .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
             .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
@@ -153,10 +152,11 @@ private:
         );
     }
 
-void driver_read(uint16_t* buffer, size_t length) override
+void driver_read(std::span<std::uint16_t> p_buffer) override
 {
-    if (buffer == nullptr || length == 0 ||
-        length > 0xFFFFU) {
+    auto* const buffer = p_buffer.data();
+    const std::size_t length = p_buffer.size();
+    if (buffer == nullptr || length == 0 || length > 0xFFFFU) {
         return;
     }
 
@@ -496,13 +496,13 @@ class crc32_hardware : public lab6::crc32
 {
 private:
 
-  static constexpr std::uintptr_t CRC_BASE = 0x40440000;
+  static constexpr std::uintptr_t CRC_BASE_ADDR = 0x40440000;
 
-  static constexpr std::uintptr_t CRC_PWREN = CRC_BASE + 0x0800;
-  static constexpr std::uintptr_t CRC_CTRL  = CRC_BASE + 0x1100;
-  static constexpr std::uintptr_t CRC_SEED  = CRC_BASE + 0x1104;
-  static constexpr std::uintptr_t CRC_IN    = CRC_BASE + 0x1108;
-  static constexpr std::uintptr_t CRC_OUT   = CRC_BASE + 0x111C;
+  static constexpr std::uintptr_t CRC_PWREN = CRC_BASE_ADDR + 0x0800;
+  static constexpr std::uintptr_t CRC_CTRL  = CRC_BASE_ADDR + 0x1100;
+  static constexpr std::uintptr_t CRC_SEED  = CRC_BASE_ADDR + 0x1104;
+  static constexpr std::uintptr_t CRC_IN    = CRC_BASE_ADDR + 0x1108;
+  static constexpr std::uintptr_t CRC_OUT   = CRC_BASE_ADDR + 0x111C;
 
   static constexpr std::uint32_t INITIAL_VALUE = 0xFFFFFFFFU;
   static constexpr std::uint32_t FINAL_XOR     = 0xFFFFFFFFU;
@@ -588,6 +588,90 @@ private:
 };
 
 namespace {
+// Concrete GPIO adapters for the LaunchPad pins used by Lab 5.
+// PINCM numbers and GPIO bit numbers follow the LP-MSPM0G3507 board wiring.
+class launchpad_input_pin : public lab1::input_pin
+{
+public:
+  launchpad_input_pin(GPIO_Regs* p_port, std::uint32_t p_pin,
+                      std::uint32_t p_pincm, lab1::pin_resistor p_resistor)
+    : m_port(p_port), m_pin(p_pin), m_pincm(p_pincm), m_resistor(p_resistor)
+  {
+    (void)configure({.resistor = p_resistor});
+  }
+
+private:
+  bool driver_configure(settings const& p_settings) override
+  {
+    DL_GPIO_enablePower(m_port);
+    DL_GPIO_RESISTOR resistor = DL_GPIO_RESISTOR_NONE;
+    if (p_settings.resistor == lab1::pin_resistor::pull_up) {
+      resistor = DL_GPIO_RESISTOR_PULL_UP;
+    } else if (p_settings.resistor == lab1::pin_resistor::pull_down) {
+      resistor = DL_GPIO_RESISTOR_PULL_DOWN;
+    }
+    DL_GPIO_initDigitalInputFeatures(
+      m_pincm, DL_GPIO_INVERSION_DISABLE, resistor,
+      DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    return true;
+  }
+
+  bool driver_level() override
+  {
+    return (DL_GPIO_readPins(m_port, m_pin) & m_pin) != 0U;
+  }
+
+  GPIO_Regs* m_port;
+  std::uint32_t m_pin;
+  std::uint32_t m_pincm;
+  lab1::pin_resistor m_resistor;
+};
+
+class launchpad_output_pin : public lab1::output_pin
+{
+public:
+  launchpad_output_pin(GPIO_Regs* p_port, std::uint32_t p_pin,
+                       std::uint32_t p_pincm, bool p_active_low = false)
+    : m_port(p_port), m_pin(p_pin), m_pincm(p_pincm),
+      m_inversion(p_active_low ? DL_GPIO_INVERSION_ENABLE
+                               : DL_GPIO_INVERSION_DISABLE)
+  {
+    (void)configure({.resistor = lab1::pin_resistor::none,
+                     .open_drain = false});
+  }
+
+private:
+  bool driver_configure(settings const&) override
+  {
+    DL_GPIO_enablePower(m_port);
+    DL_GPIO_initDigitalOutputFeatures(
+      m_pincm, m_inversion, DL_GPIO_RESISTOR_NONE,
+      DL_GPIO_DRIVE_STRENGTH_LOW, DL_GPIO_HIZ_DISABLE);
+    DL_GPIO_clearPins(m_port, m_pin);
+    DL_GPIO_enableOutput(m_port, m_pin);
+    return true;
+  }
+
+  void driver_level(bool p_high) override
+  {
+    if (p_high) {
+      DL_GPIO_setPins(m_port, m_pin);
+    } else {
+      DL_GPIO_clearPins(m_port, m_pin);
+    }
+  }
+
+  bool driver_level() override
+  {
+    return (DL_GPIO_readPins(m_port, m_pin) & m_pin) != 0U;
+  }
+
+  GPIO_Regs* m_port;
+  std::uint32_t m_pin;
+  std::uint32_t m_pincm;
+  DL_GPIO_INVERSION m_inversion;
+};
+
 // =============================================================================
 // Shared between both boards
 // =============================================================================
@@ -880,7 +964,7 @@ void sampler_task(void*)
 
     // One ADC DMA transfer fills the entire raw sample array.
     adc_read_success = false;
-    adc.read(raw_samples.data(), raw_samples.size());
+    adc.read(raw_samples);
 
     if (!adc_read_success) {
       std::printf("ADC DMA transfer failed; dropping this batch\n");
@@ -912,8 +996,8 @@ void transmit_task(void*)
   application_crc crc;
   crc32_software software_crc;
   // S1 is active high on the LaunchPad. Holding it deliberately corrupts a packet.
-  lab1::mspm0_input_pin corruption_button(
-    lab1::gpioa_base, 18, 40, lab1::pin_resistor::pull_down);
+  launchpad_input_pin corruption_button(
+    GPIOA, (1UL << 18), 40, lab1::pin_resistor::pull_down);
 
   temperature_batch batch{};
 
@@ -972,13 +1056,13 @@ void transmit_task(void*)
 void display_task(void*)
 {
   application_crc crc;
-  lab1::mspm0_input_pin s1(lab1::gpioa_base, 18, 40,
-                           lab1::pin_resistor::pull_down);
-  lab1::mspm0_input_pin s2(lab1::gpiob_base, 21, 49,
-                           lab1::pin_resistor::pull_up);
-  lab1::mspm0_output_pin red(lab1::gpiob_base, 26, 57);
-  lab1::mspm0_output_pin green(lab1::gpiob_base, 27, 58);
-  lab1::mspm0_output_pin blue(lab1::gpiob_base, 22, 50);
+  launchpad_input_pin s1(GPIOA, (1UL << 18), 40,
+                          lab1::pin_resistor::pull_down);
+  launchpad_input_pin s2(GPIOB, (1UL << 21), 49,
+                          lab1::pin_resistor::pull_up);
+  launchpad_output_pin red(GPIOB, (1UL << 26), 57, true);
+  launchpad_output_pin green(GPIOB, (1UL << 27), 58, true);
+  launchpad_output_pin blue(GPIOB, (1UL << 22), 50, true);
   set_led(red, green, blue, led_color::off);
 
   while (true) {
