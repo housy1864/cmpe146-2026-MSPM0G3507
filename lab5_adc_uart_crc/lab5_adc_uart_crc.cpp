@@ -98,19 +98,21 @@ public:
             DL_ADC12_DMA_MEM0_RESULT_LOADED
         );
 
-        // Enable DMA channel 0 completion event.
-        DL_DMA_clearEventsStatus(
+
+        // Enable DMA channel 0 CPU interrupt.
+        DL_DMA_clearInterruptStatus(
             DMA,
-            DL_DMA_EVENT_CHANNEL0
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        DL_DMA_enableEvent(
+        DL_DMA_enableInterrupt(
             DMA,
-            DL_DMA_EVENT_CHANNEL0
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        // Enable the DMA interrupt in the NVIC.
+        // Enable DMA interrupt in the NVIC.
         NVIC_EnableIRQ(DMA_INT_IRQn);
+
 
         // 7. Configure DMA channel 0.
         static const DL_DMA_Config dma_config = {
