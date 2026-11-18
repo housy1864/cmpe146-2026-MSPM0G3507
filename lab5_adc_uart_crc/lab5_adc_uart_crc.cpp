@@ -55,7 +55,7 @@ extern "C" void ADC0_IRQHandler()
 // Add the matching `extern "C" void UARTn_IRQHandler()` for the UART instance
 // you pick (UART0 through UART3).
 class uart_serial_driver : public lab6::serial
-{
+{ // Overview Page: 1,242
 private:
   bool driver_configure(settings const& p_settings) override
   {
@@ -68,12 +68,18 @@ private:
       return false;
     }
 
-    // With 16x oversampling, the UART divisor is represented as:
-    //
-    //   divisor = IBRD + FBRD / 64
-    //
-    // Round the fractional part to the nearest representable value.  Do all
-    // validation before touching the peripheral registers.
+    /* With 16x oversampling, the UART divisor is represented as:
+
+         divisor = IBRD + FBRD / 64
+
+      Round the fractional part to the nearest representable value.  Do all
+      validation before touching the peripheral registers.
+
+      Purpose of a divisor: Slows down the clock by a specific rate to attain
+      the baud rate desired for the UART connection.
+
+    */
+
     std::uint32_t const divisor_x64 =
       (uart_clock_hz * 64U + (oversampling * p_settings.baud_rate) / 2U) /
       (oversampling * p_settings.baud_rate);
@@ -87,21 +93,21 @@ private:
     std::uint32_t parity = UART_LCRH_PEN_DISABLE;
     switch (p_settings.parity) {
       case settings::parity::none:
-        break;
+        break; // No parity bit transmitted
       case settings::parity::odd:
         parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_ODD;
-        break;
+        break; // Parity with odd number of 1 bits
       case settings::parity::even:
         parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_EVEN;
-        break;
+        break; // Parity with even number of 1 bits
       case settings::parity::forced1:
         parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
                  UART_LCRH_EPS_ODD;
-        break;
+        break; // Parity bit always 1
       case settings::parity::forced0:
         parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
                  UART_LCRH_EPS_EVEN;
-        break;
+        break; // Parity bit always 0
     }
 
     // The LaunchPad diagram routes this UART through PA8 (TX) and PA9 (RX).
@@ -115,12 +121,12 @@ private:
 
     // Register-level UART1 configuration.
     UART1->GPRCM.PWREN =
-      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE;
+      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE; // Pg. 1267
     UART1->GPRCM.RSTCTL =
       UART_RSTCTL_KEY_UNLOCK_W | UART_RSTCTL_RESETSTKYCLR_CLR |
-      UART_RSTCTL_RESETASSERT_ASSERT;
+      UART_RSTCTL_RESETASSERT_ASSERT; // Pg. 1268
 
-    UART1->CLKSEL = UART_CLKSEL_BUSCLK_SEL_ENABLE;
+    UART1->CLKSEL = UART_CLKSEL_BUSCLK_SEL_ENABLE; // Pg. 1272
     UART1->CLKDIV = UART_CLKDIV_RATIO_DIV_BY_1;
 
     UART1->CTL0 = UART_CTL0_MODE_UART | UART_CTL0_HSE_OVS16 |
