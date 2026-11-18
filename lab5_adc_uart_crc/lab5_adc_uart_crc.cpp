@@ -90,7 +90,8 @@ public:
 
         // 5. Set the ADC sample time.
         // At 32 MHz, 400 ADC clock cycles = 12.5 microseconds.
-        DL_ADC12_setSampleTime0(ADC0, 400);
+        // 50 us sampling time, matching TI's temperature sensor example.
+        DL_ADC12_setSampleTime0(ADC0, 1600);
 
         // 6. Configure ADC DMA requests.
         // One ADC result is transferred for each DMA request.
@@ -220,12 +221,6 @@ private:
         DL_ADC12_disableDMA(ADC0);
 
         adc_waiting_task = nullptr;
-
-        // Convert samples.
-        for (auto& sample : buffer)
-        {
-            sample = upscale_12_to_16(sample);
-        }
 
         // Convert all 12-bit values to the required 16-bit format.
         for (auto& sample : buffer)
@@ -560,53 +555,33 @@ static StackType_t adc_test_task_stack[task_stack_words];
 
 void adc_test_task(void*)
 {
-    std::printf("ADC CPU test started!\n");
+    std::printf("ADC DMA test started!\n");
 
     adc_driver adc;
 
-    std::printf("ADC driver initialized!\n");
+    std::array<std::uint16_t, 64> samples{};
 
     while (true)
     {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-        );
+        std::printf("Starting DMA read...\n");
 
-        DL_ADC12_startConversion(ADC0);
+        adc.read(samples);
 
-        std::printf("Waiting for ADC...\n");
+        std::printf("DMA read returned!\n");
 
-        uint32_t timeout = 1000000;
-
-        while (
-            (DL_ADC12_getRawInterruptStatus(
-                ADC0,
-                DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-            ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
-            && timeout > 0
-        )
+        for (std::size_t i = 0; i < samples.size(); i++)
         {
-            timeout--;
+            std::printf(
+                "Sample %u: %u\n",
+                static_cast<unsigned>(i),
+                static_cast<unsigned>(samples[i])
+            );
         }
-
-        if (timeout == 0)
-        {
-            std::printf("ADC TIMEOUT!\n");
-        }
-        else
-        {
-            uint16_t raw =
-                ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
-
-            std::printf("ADC SUCCESS: %u\n", raw);
-        }
-
-        DL_ADC12_stopConversion(ADC0);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+
 
 
 // 3. Main
