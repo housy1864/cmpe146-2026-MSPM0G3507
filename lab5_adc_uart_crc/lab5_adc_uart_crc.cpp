@@ -57,6 +57,47 @@ extern "C" void ADC0_IRQHandler()
 class serial_driver
 {};
 
+// Convert to temperature
+// Convert an ADC reading into temperature in units of 0.1 degrees Celsius.
+static std::int16_t convert_to_temperature(std::uint16_t sample)
+{
+    // The ADC result was expanded from 12 bits to 16 bits.
+    // Recover the original 12-bit ADC code.
+    const std::uint16_t sample_code = sample >> 4;
+
+    // Factory calibration code measured at 30 degrees Celsius.
+    const std::uint16_t trim =
+        DL_SYSCTL_getTempCalibrationConstant();
+
+    // Convert the ADC difference into degrees Celsius.
+    constexpr float reference_voltage = 3.3f;
+    constexpr float adc_max_code = 4096.0f;
+    constexpr float sensor_slope = -0.0018f;
+
+    const float sample_voltage =
+        reference_voltage * sample_code / adc_max_code;
+
+    const float trim_voltage =
+        reference_voltage * trim / adc_max_code;
+
+    const float temperature_c =
+        30.0f + (sample_voltage - trim_voltage) / sensor_slope;
+
+    // Store temperature in tenths of a degree Celsius.
+    // Example: 25.3 C becomes 253.
+    const float scaled_temperature = temperature_c * 10.0f;
+
+    if (scaled_temperature > 32767.0f)
+        return 32767;
+
+    if (scaled_temperature < -32768.0f)
+        return -32768;
+
+    return static_cast<std::int16_t>(scaled_temperature + 0.5f);
+}
+
+
+
 // =============================================================================
 // Role 3: CRC
 // =============================================================================
