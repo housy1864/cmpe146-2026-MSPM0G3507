@@ -192,16 +192,8 @@ private:
         DL_DMA_enableChannel(DMA, adc_dma_channel);
         DL_ADC12_enableDMA(ADC0);
 
-        // // Start repeated ADC conversions.
-        // DL_ADC12_startConversion(ADC0);
-
         // // Sleep until the ADC interrupt notifies this task.
         // ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        // // Stop conversions after the transfer finishes.
-        // DL_ADC12_stopConversion(ADC0);
-        // DL_ADC12_disableDMA(ADC0);
-
 
         // Temperatory timeout 
         // Start repeated ADC conversions.
@@ -219,7 +211,7 @@ private:
             return;
         }
 
-        // DMA finished.
+        // DMA finish after transfer
         DL_ADC12_stopConversion(ADC0);
         DL_ADC12_disableDMA(ADC0);
         DL_DMA_disableChannel(DMA, adc_dma_channel);
@@ -318,8 +310,6 @@ static std::int16_t convert_to_temperature(std::uint16_t sample)
 
     return static_cast<std::int16_t>(scaled_temperature + 0.5f);
 }
-
-
 
 // =============================================================================
 // Role 3: CRC
@@ -585,8 +575,6 @@ void adc_test_task(void*)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
-
-
 
 // 3. Main
 int main()
