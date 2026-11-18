@@ -102,18 +102,20 @@ public:
             DL_ADC12_DMA_MEM0_RESULT_LOADED
         );
 
-        // Enable the ADC DMA-complete interrupt.
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        // Enable DMA channel 0 transfer-complete interrupt.
+        DL_DMA_clearInterruptStatus(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        DL_ADC12_enableInterrupt(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        DL_DMA_enableInterrupt(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        NVIC_EnableIRQ(ADC0_INT_IRQn);
+        // Enable DMA interrupt at the NVIC.
+        NVIC_ClearPendingIRQ(DMA_INT_IRQn);
+        NVIC_EnableIRQ(DMA_INT_IRQn);
 
         // 7. Configure DMA channel 0 -- P56
         static const DL_DMA_Config dma_config = {
@@ -182,6 +184,11 @@ private:
             static_cast<uint16_t>(buffer.size())
         );
 
+        DL_DMA_clearInterruptStatus(
+          DMA,
+          DL_DMA_INTERRUPT_CHANNEL0
+        );
+
         // Remember which task must be awakened after sampling.
         adc_waiting_task = xTaskGetCurrentTaskHandle();
 
@@ -219,6 +226,7 @@ private:
         // DMA finished.
         DL_ADC12_stopConversion(ADC0);
         DL_ADC12_disableDMA(ADC0);
+        DL_DMA_disableChannel(DMA, adc_dma_channel);
 
         adc_waiting_task = nullptr;
 
@@ -236,14 +244,14 @@ private:
 // DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 // ADC interrupt handler.
-extern "C" void ADC0_IRQHandler()
+extern "C" void DMA_IRQHandler()
 {
-    if (DL_ADC12_getPendingInterrupt(ADC0) ==
-        DL_ADC12_IIDX_DMA_DONE)
+    if (DL_DMA_getPendingInterrupt(DMA) ==
+        DL_DMA_EVENT_IIDX_DMACH0)
     {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        DL_DMA_clearInterruptStatus(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
         BaseType_t higher_priority_task_woken = pdFALSE;
