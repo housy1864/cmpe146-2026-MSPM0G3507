@@ -98,16 +98,18 @@ public:
             DL_ADC12_DMA_MEM0_RESULT_LOADED
         );
 
-        // Enable DMA channel 0 completion interrupt.
-        DL_DMA_clearInterruptStatus(
+        // Enable DMA channel 0 completion event.
+        DL_DMA_clearEventsStatus(
             DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
+            DL_DMA_EVENT_CHANNEL0
         );
 
-        DL_DMA_enableInterrupt(
+        DL_DMA_enableEvent(
             DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
+            DL_DMA_EVENT_CHANNEL0
         );
+
+NVIC_EnableIRQ(DMA_INT_IRQn);
 
         // Enable the DMA interrupt in the NVIC.
         NVIC_EnableIRQ(DMA_INT_IRQn);
@@ -232,14 +234,14 @@ void driver_read(std::span<std::uint16_t> buffer) override
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
 // ADC interrupt handler.
-extern "C" void DMA_IRQHandler()
+extern "C" void DMA_IRQHandler(void)
 {
     if (DL_DMA_getPendingInterrupt(DMA) ==
         DL_DMA_EVENT_IIDX_DMACH0)
     {
-        DL_DMA_clearInterruptStatus(
+        DL_DMA_clearEventsStatus(
             DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
+            DL_DMA_EVENT_CHANNEL0
         );
 
         BaseType_t higher_priority_task_woken = pdFALSE;
