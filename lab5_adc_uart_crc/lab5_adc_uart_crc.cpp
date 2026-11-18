@@ -393,8 +393,28 @@ void request_task(void*)
 //   4. xQueueSend(batch_queue, &batch, portMAX_DELAY)
 void sampler_task(void*)
 {
-  while (true) {
-  }
+    adc_driver adc;
+
+    std::array<std::uint16_t, samples_per_batch> raw_samples{};
+    temperature_batch batch{};
+
+    while (true)
+    {
+        // Wait for a request to collect a new batch.
+        xSemaphoreTake(sample_request, portMAX_DELAY);
+
+        // Acquire 64 ADC samples in one DMA transfer.
+        adc.read(raw_samples);
+
+        // Convert every sample into temperature.
+        for (std::size_t i = 0; i < samples_per_batch; ++i)
+        {
+            batch[i] = convert_to_temperature(raw_samples[i]);
+        }
+
+        // Send the completed batch to the next task.
+        xQueueSend(batch_queue, &batch, portMAX_DELAY);
+    }
 }
 
 // TODO(lab, role 3): Construct a crc32_hardware and a lab1::input_pin for
