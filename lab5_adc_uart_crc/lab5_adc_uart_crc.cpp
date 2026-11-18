@@ -222,7 +222,7 @@ private:
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
 // ADC interrupt handler.
-extern "C" void ADC0_IRQHandler()
+/*extern "C" void ADC0_IRQHandler()
 {
     if (DL_ADC12_getPendingInterrupt(ADC0) ==
         DL_ADC12_IIDX_DMA_DONE)
@@ -241,6 +241,43 @@ extern "C" void ADC0_IRQHandler()
                 &higher_priority_task_woken
             );
         }
+
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
+}*/
+
+extern "C" void ADC0_IRQHandler()
+{
+    DL_ADC12_IIDX pending =
+        DL_ADC12_getPendingInterrupt(ADC0);
+
+    if (pending == DL_ADC12_IIDX_MEM0_RESULT_LOADED)
+    {
+        // A conversion result has been loaded into MEM0.
+        volatile uint16_t result =
+            DL_ADC12_getMemResult(ADC0, DL_ADC12_MEM_IDX_0);
+
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+        );
+
+        return;
+    }
+
+    if (pending == DL_ADC12_IIDX_DMA_DONE)
+    {
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        BaseType_t higher_priority_task_woken = pdFALSE;
+
+        vTaskNotifyGiveFromISR(
+            adc_waiting_task,
+            &higher_priority_task_woken
+        );
 
         portYIELD_FROM_ISR(higher_priority_task_woken);
     }
