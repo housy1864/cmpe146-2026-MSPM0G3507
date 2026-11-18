@@ -355,7 +355,7 @@ void sampler_task(void*)
         for (std::size_t i = 0; i < samples_per_batch; i++)
         {
             temperatures[i] =
-                convert_to_temperature(raw_samples[i]);
+                convert_temperature(raw_samples[i]);
         }
 
         xQueueSend(
