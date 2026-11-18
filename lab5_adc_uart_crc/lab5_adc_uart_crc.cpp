@@ -92,6 +92,18 @@ public:
             DL_ADC12_DMA_MEM0_RESULT_LOADED
         );
 
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        DL_ADC12_enableInterrupt(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        NVIC_EnableIRQ(ADC0_INT_IRQn);
+
         // 7. Configure DMA channel 0.
         static const DL_DMA_Config dma_config = {
             .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
@@ -120,18 +132,6 @@ public:
             )
         );
 
-        // 8. Enable DMA channel completion interrupt.
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        DL_ADC12_enableInterrupt(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-);
-
-        NVIC_EnableIRQ(ADC0_INT_IRQn);
 
         // 9. Enable ADC conversions.
         DL_ADC12_enableConversions(ADC0);
