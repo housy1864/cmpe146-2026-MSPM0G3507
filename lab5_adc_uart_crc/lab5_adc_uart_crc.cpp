@@ -120,7 +120,7 @@ public:
 private:
   void driver_read(uint16_t* buffer, size_t length) override
   {
-    if (buffer.empty()) return;
+    if (length == 0) return;
 
     // Prepare DMA for this buffer.
     DL_DMA_disableChannel(DMA, adc_dma_channel);
@@ -128,13 +128,13 @@ private:
     DL_DMA_setDestAddr(
       DMA,
       adc_dma_channel,
-      reinterpret_cast<std::uint32_t>(buffer.data())
+      reinterpret_cast<std::uint32_t>(buffer)
     );
 
     DL_DMA_setTransferSize(
       DMA,
       adc_dma_channel,
-      static_cast<std::uint16_t>(buffer.size())
+      static_cast<std::uint16_t>(length)
     );
 
     // Save the task before starting the conversion.
@@ -151,7 +151,7 @@ private:
     DL_ADC12_stopConversion(ADC0);
 
     // Convert 12-bit values to the 16-bit interface format.
-    for (auto& sample : buffer)
+    for (size_t i = 0; i < length; i++)
     {
       std::uint16_t value = sample & 0x0FFF;
       sample = static_cast<std::uint16_t>(
@@ -354,7 +354,7 @@ void sampler_task(void*)
 
       // 2. Collect 64 ADC samples using DMA.
       // This call sleeps until the DMA interrupt finishes.
-      adc.read(raw_samples.data(), raw_samples.size());
+      adc.read(samples.data(), samples.size());
 
       // 3. Convert all 64 ADC samples into temperatures.
       for (std::size_t i = 0; i < samples_per_batch; i++)
@@ -501,7 +501,7 @@ void adc_test_task(void*)
     {
         std::printf("Starting ADC read...\n");
 
-        adc.read(samples);
+        adc.read(samples.data(), samples.size());
 
         std::printf("ADC read completed!\n");
 
