@@ -69,10 +69,107 @@ private:
   static constexpr std::uintptr_t IOMUX_PA8 = 0x4042'804CU;
   static constexpr std::uintptr_t IOMUX_PA9 = 0x4042'8050U;
 
-  // IOMUX PINCM fields. PA8/PA9 use peripheral function 2 for UART1.
+  // UART1 register addresses used by this class. TRM Pgs. 1265-1266
+  static constexpr std::uintptr_t UART1_REG_BASE = 0x4010'0000U;
+  static constexpr std::uintptr_t UART1_PWREN = UART1_REG_BASE + 0x800U;
+  static constexpr std::uintptr_t UART1_RSTCTL = UART1_REG_BASE + 0x804U;
+  static constexpr std::uintptr_t UART1_CLKDIV = UART1_REG_BASE + 0x1000U;
+  static constexpr std::uintptr_t UART1_CLKSEL = UART1_REG_BASE + 0x1008U;
+  static constexpr std::uintptr_t UART1_IIDX = UART1_REG_BASE + 0x1020U;
+  static constexpr std::uintptr_t UART1_IMASK = UART1_REG_BASE + 0x1028U;
+  static constexpr std::uintptr_t UART1_ICLR = UART1_REG_BASE + 0x1048U;
+  static constexpr std::uintptr_t UART1_CTL0 = UART1_REG_BASE + 0x1100U;
+  static constexpr std::uintptr_t UART1_LCRH = UART1_REG_BASE + 0x1104U;
+  static constexpr std::uintptr_t UART1_STAT = UART1_REG_BASE + 0x1108U;
+  static constexpr std::uintptr_t UART1_IFLS = UART1_REG_BASE + 0x110CU;
+  static constexpr std::uintptr_t UART1_IBRD = UART1_REG_BASE + 0x1110U;
+  static constexpr std::uintptr_t UART1_FBRD = UART1_REG_BASE + 0x1114U;
+  static constexpr std::uintptr_t UART1_TXDATA = UART1_REG_BASE + 0x1120U;
+  static constexpr std::uintptr_t UART1_RXDATA = UART1_REG_BASE + 0x1124U;
+  static constexpr std::uintptr_t NVIC_ISER0 = 0xE000'E100U;
+
+  // UART configuration values used by this class.
+  // Unlocks writes to the UART power-control register.
+  static constexpr std::uint32_t PWREN_KEY = 0x2600'0000U;
+  // Powers the UART peripheral on.
+  static constexpr std::uint32_t PWREN_ENABLE = (1U << 0U);
+  // Unlocks writes to the UART reset-control register.
+  static constexpr std::uint32_t RSTCTL_KEY = 0xB100'0000U;
+  // Clears a previously latched UART reset request.
+  static constexpr std::uint32_t RSTCTL_STICKY_CLEAR = (1U << 1U);
+  // Asserts reset so configuration starts from a known state.
+  static constexpr std::uint32_t RSTCTL_ASSERT = (1U << 0U);
+  // Selects the 32 MHz BUSCLK as UART1's clock source.
+  static constexpr std::uint32_t CLKSEL_BUSCLK = (1U << 3U);
+  // Enables the UART after all other configuration is complete.
+  static constexpr std::uint32_t CTL0_ENABLE = (1U << 0U);
+  // Enables the UART receiver.
+  static constexpr std::uint32_t CTL0_RXE = (1U << 3U);
+  // Enables the UART transmitter.
+  static constexpr std::uint32_t CTL0_TXE = (1U << 4U);
+  // Enables the UART FIFOs.
+  static constexpr std::uint32_t CTL0_FEN = (1U << 17U);
+  // Enables parity generation/checking when selected by settings.
+  static constexpr std::uint32_t LCRH_PEN = (1U << 1U);
+  // Selects even parity when set; clear selects odd parity.
+  static constexpr std::uint32_t LCRH_EPS = (1U << 2U);
+  // Selects two stop bits; clear selects one stop bit.
+  static constexpr std::uint32_t LCRH_STP2 = (1U << 3U);
+  // Selects eight data bits per UART frame.
+  static constexpr std::uint32_t LCRH_WLEN8 = 3U << 5U;
+  // Forces the selected parity value instead of calculating parity.
+  static constexpr std::uint32_t LCRH_SPS = (1U << 7U);
+  // Identifies the RX FIFO threshold field to update.
+  static constexpr std::uint32_t IFLS_RX_MASK = 7U << 4U;
+  // Requests an RX interrupt at the lowest FIFO threshold.
+  static constexpr std::uint32_t IFLS_RX_LEVEL_1 = 7U << 4U;
+  // Enables the UART receive-data interrupt.
+  static constexpr std::uint32_t INT_RX = (1U << 10U);
+  // Enables framing-error interrupts.
+  static constexpr std::uint32_t INT_FRMERR = (1U << 1U);
+  // Enables parity-error interrupts.
+  static constexpr std::uint32_t INT_PARERR = (1U << 2U);
+  // Enables break-error interrupts.
+  static constexpr std::uint32_t INT_BRKERR = (1U << 3U);
+  // Enables receive-overrun interrupts.
+  static constexpr std::uint32_t INT_OVRERR = (1U << 4U);
+  // Interrupt index for receive timeout.
+  static constexpr std::uint32_t IIDX_RTFG = 1U;
+  // Interrupt index for framing error.
+  static constexpr std::uint32_t IIDX_FEFG = 2U;
+  // Interrupt index for parity error.
+  static constexpr std::uint32_t IIDX_PEFG = 3U;
+  // Interrupt index for break error.
+  static constexpr std::uint32_t IIDX_BEFG = 4U;
+  // Interrupt index for receive overrun.
+  static constexpr std::uint32_t IIDX_OEFG = 5U;
+  // Interrupt index for received data available.
+  static constexpr std::uint32_t IIDX_RXIFG = 0xBU;
+  // Indicates that the RX FIFO is empty.
+  static constexpr std::uint32_t STAT_RXFE = (1U << 2U);
+  // Indicates that the TX FIFO is full.
+  static constexpr std::uint32_t STAT_TXFF = (1U << 7U);
+  // Selects the eight-bit data field from RXDATA.
+  static constexpr std::uint32_t RXDATA_MASK = 0xFFU;
+  // Marks a framing error on the received byte.
+  static constexpr std::uint32_t RXDATA_FRMERR = (1U << 8U);
+  // Marks a parity error on the received byte.
+  static constexpr std::uint32_t RXDATA_PARERR = (1U << 9U);
+  // Marks a break condition on the received byte.
+  static constexpr std::uint32_t RXDATA_BRKERR = (1U << 10U);
+  // Marks a receive-overrun error on the received byte.
+  static constexpr std::uint32_t RXDATA_OVRERR = (1U << 11U);
+
+  // Select UART1's peripheral function for PA8 (TX) and PA9 (RX).
   static constexpr std::uint32_t PINCM_PF_UART1 = 2U;
+
+  // Connect the PINCM-controlled pin to its selected peripheral function.
   static constexpr std::uint32_t PINCM_PC_CONNECTED = (1U << 7);
+
+  // Enable the internal pull-up used by the idle-high UART RX line (PA9).
   static constexpr std::uint32_t PINCM_PIPU_ENABLE = (1U << 17);
+
+  // Enable the input buffer so UART1 can sample PA9.
   static constexpr std::uint32_t PINCM_INENA_ENABLE = (1U << 18);
 
   static volatile std::uint32_t* reg(std::uintptr_t address)
@@ -80,39 +177,57 @@ private:
     return reinterpret_cast<volatile std::uint32_t*>(address);
   }
 
+  static volatile std::uint32_t* uart_reg(std::uintptr_t const address)
+  {
+    return reg(address);
+  }
+
 public:
   explicit uart_serial_driver(settings const& p_settings)
     : m_configured(driver_configure(p_settings))
   {
-  }
+  } // Configures UART at construction, is following 1-Phase Initialization
 
   [[nodiscard]] bool is_configured() const
   {
     return m_configured;
   }
 
+  struct debug_registers {
+    std::uint32_t stat;
+    std::uint32_t iidx;
+    std::uint32_t ctl0;
+    std::uint32_t clksel;
+    std::uint32_t pwren;
+  };
+
+  [[nodiscard]] static debug_registers debug_state()
+  {
+    return { *uart_reg(UART1_STAT), *uart_reg(UART1_IIDX),
+             *uart_reg(UART1_CTL0), *uart_reg(UART1_CLKSEL),
+             *uart_reg(UART1_PWREN) };
+  }
+
   static void handle_interrupt()
   {
     // Read UART1's interrupt index to identify the highest-priority pending event.
-    switch (UART1->CPU_INT.IIDX) {
+    switch (*uart_reg(UART1_IIDX)) {
       // A receive interrupt means at least one byte is available in the RX FIFO.
-      case UART_CPU_INT_IIDX_STAT_RXIFG:
+      case IIDX_RXIFG:
       // A receive-timeout interrupt also means received data may remain in the FIFO.
-      case UART_CPU_INT_IIDX_STAT_RTFG:
+      case IIDX_RTFG:
         // Continue until every byte currently waiting in the RX FIFO is processed.
-        while ((UART1->STAT & UART_STAT_RXFE_MASK) ==
-               UART_STAT_RXFE_CLEARED) {
+        while ((*uart_reg(UART1_STAT) & STAT_RXFE) == 0U) {
           // Read the received byte and any error flags attached to that byte.
-          std::uint32_t const received = UART1->RXDATA;
+          std::uint32_t const received = *uart_reg(UART1_RXDATA);
           // Combine all UART receive-error bits into one mask for validation.
           constexpr std::uint32_t error_mask =
-            UART_RXDATA_FRMERR_MASK | UART_RXDATA_PARERR_MASK |
-            UART_RXDATA_BRKERR_MASK | UART_RXDATA_OVRERR_MASK;
+            RXDATA_FRMERR | RXDATA_PARERR | RXDATA_BRKERR | RXDATA_OVRERR;
           // Store only bytes that were received without a UART-level error.
           if ((received & error_mask) == 0U) {
             // Keep only the 8-bit data field and write it at the current cursor.
             receive_storage[receive_write_cursor] =
-              static_cast<std::uint8_t>(received & UART_RXDATA_DATA_MASK);
+              static_cast<std::uint8_t>(received & RXDATA_MASK);
             // Advance the cursor and wrap it to zero at the buffer boundary.
             receive_write_cursor =
               (receive_write_cursor + 1U) % receive_buffer_size;
@@ -122,20 +237,17 @@ public:
         break;
 
       // These interrupt causes indicate a UART receive error.
-      case UART_CPU_INT_IIDX_STAT_FEFG:
-      case UART_CPU_INT_IIDX_STAT_PEFG:
-      case UART_CPU_INT_IIDX_STAT_BEFG:
-      case UART_CPU_INT_IIDX_STAT_OEFG:
+      case IIDX_FEFG:
+      case IIDX_PEFG:
+      case IIDX_BEFG:
+      case IIDX_OEFG:
         // If an errored byte is present, read it to remove it from the FIFO.
-        if ((UART1->STAT & UART_STAT_RXFE_MASK) ==
-            UART_STAT_RXFE_CLEARED) {
-          (void)UART1->RXDATA;
+        if ((*uart_reg(UART1_STAT) & STAT_RXFE) == 0U) {
+          (void)*uart_reg(UART1_RXDATA);
         }
         // Explicitly clear all receive-error interrupt flags.
-        UART1->CPU_INT.ICLR = UART_CPU_INT_ICLR_FRMERR_CLR |
-                              UART_CPU_INT_ICLR_PARERR_CLR |
-                              UART_CPU_INT_ICLR_BRKERR_CLR |
-                              UART_CPU_INT_ICLR_OVRERR_CLR;
+        *uart_reg(UART1_ICLR) = INT_FRMERR | INT_PARERR |
+                                INT_BRKERR | INT_OVRERR;
         // Do not place an errored byte into the receive buffer.
         break;
 
@@ -181,81 +293,78 @@ private:
     if (integer_divisor == 0U ||
         integer_divisor > std::numeric_limits<std::uint16_t>::max()) {
       return false;
-    }
+    } // Numeric Limits has limits of a numertic tyoe.
 
-    std::uint32_t parity = UART_LCRH_PEN_DISABLE;
+    std::uint32_t parity = 0U; // Chooses parity bit check to catch errors when transmission is unexpected.
     switch (p_settings.parity) {
       case settings::parity::none:
         break; // No parity bit transmitted
       case settings::parity::odd:
-        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_ODD;
+        parity = LCRH_PEN;
         break; // Parity with odd number of 1 bits
       case settings::parity::even:
-        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_EPS_EVEN;
+        parity = LCRH_PEN | LCRH_EPS;
         break; // Parity with even number of 1 bits
       case settings::parity::forced1:
-        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
-                 UART_LCRH_EPS_ODD;
+        parity = LCRH_PEN | LCRH_SPS;
         break; // Parity bit always 1
       case settings::parity::forced0:
-        parity = UART_LCRH_PEN_ENABLE | UART_LCRH_SPS_ENABLE |
-                 UART_LCRH_EPS_EVEN;
+        parity = LCRH_PEN | LCRH_SPS | LCRH_EPS;
         break; // Parity bit always 0
     }
 
     // The LaunchPad diagram routes this UART through PA8 (TX) and PA9 (RX).
     // J14 must be installed in position 2-3 so the header RX signal selects
-    // PA9 rather than PB23.
+    // PA9 rather than PB23. UART1 pincm: Pg. 11
     *reg(IOMUX_PA8) = PINCM_PF_UART1 | PINCM_PC_CONNECTED;
     *reg(IOMUX_PA9) = PINCM_PF_UART1 | PINCM_PC_CONNECTED |
                       PINCM_INENA_ENABLE | PINCM_PIPU_ENABLE;
 
-    // Register-level UART1 configuration.
-    UART1->GPRCM.RSTCTL =
-      UART_RSTCTL_KEY_UNLOCK_W | UART_RSTCTL_RESETSTKYCLR_CLR |
-      UART_RSTCTL_RESETASSERT_ASSERT; // Pg. 1268
-    UART1->GPRCM.PWREN =
-      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE; // Pg. 1267
+    // Register-level UART1 configuration. Pgs. 1265-1266
+    *uart_reg(UART1_RSTCTL) = RSTCTL_KEY | RSTCTL_STICKY_CLEAR |
+                              RSTCTL_ASSERT; // Resets UART1 to start configuring system
+    *uart_reg(UART1_PWREN) = PWREN_KEY | PWREN_ENABLE; // Enables power, is after reset to
+                                                       // be sure power is enabled
+    *uart_reg(UART1_CLKSEL) = CLKSEL_BUSCLK;          // Standard bus clock selected.
+    *uart_reg(UART1_CLKDIV) = 0U;                     // No clock divider necessary,
+                                                      // Fully handled by divisor x64 to
+                                                      // properly configure Baud Rate.
 
-    UART1->CLKSEL = UART_CLKSEL_BUSCLK_SEL_ENABLE; // Pg. 1272
-    UART1->CLKDIV = UART_CLKDIV_RATIO_DIV_BY_1; // Clock divider not used, dividing only done for Baud rate
-
-    UART1->CTL0 = UART_CTL0_MODE_UART | UART_CTL0_HSE_OVS16 |
-                  UART_CTL0_TXE_ENABLE | UART_CTL0_RXE_ENABLE |
-                  UART_CTL0_FEN_ENABLE; // Pgs 1299-1301
-    UART1->LCRH = UART_LCRH_WLEN_DATABIT8 | parity |
+    *uart_reg(UART1_CTL0) = CTL0_TXE | CTL0_RXE | CTL0_FEN; // Enables TX/RX abilites and
+                                                            // FIFO data transfer
+    *uart_reg(UART1_LCRH) = LCRH_WLEN8 | parity |
                   (p_settings.stop == settings::stop_bits::two
-                     ? UART_LCRH_STP2_ENABLE
-                     : UART_LCRH_STP2_DISABLE); // Pgs. 1302-1303
-    UART1->IBRD = integer_divisor; // Pg. 1308
-    UART1->FBRD = fractional_divisor; // Pg. 1309
+                     ? LCRH_STP2
+                     : 0U);         // 1 Byte(8 bit) transfers, no parity selected, default
+                                    // 1 stop bit.
+    *uart_reg(UART1_IBRD) = integer_divisor; // For Baud Rate Calculation, integer divider used
+                                             // to attain 115,200.
+    *uart_reg(UART1_FBRD) = fractional_divisor; // For Baud Rate Calculation, fraction divider
+                                                // used to attain 115,200.
 
-    // The UART requires an LCRH write after changing IBRD/FBRD.  Rewriting
+    // The UART requires an LCRH(Line control register) write after changing IBRD/FBRD.  Rewriting
     // the complete line-control value also makes the ordering explicit.
-    UART1->LCRH = UART_LCRH_WLEN_DATABIT8 | parity |
+    *uart_reg(UART1_LCRH) = LCRH_WLEN8 | parity |
                   (p_settings.stop == settings::stop_bits::two
-                     ? UART_LCRH_STP2_ENABLE
-                     : UART_LCRH_STP2_DISABLE);
-    UART1->CTL0 |= UART_CTL0_ENABLE_ENABLE;
+                     ? LCRH_STP2
+                     : 0U);
+    *uart_reg(UART1_CTL0) |= CTL0_ENABLE;                  // Enables UART control register 0.
 
-    UART1->IFLS = (UART1->IFLS & ~UART_IFLS_RXIFLSEL_MASK) |
-                  UART_IFLS_RXIFLSEL_LVL_1;
-    UART1->CPU_INT.IMASK = UART_CPU_INT_IMASK_RXINT_SET |
-                           UART_CPU_INT_IMASK_FRMERR_SET |
-                           UART_CPU_INT_IMASK_PARERR_SET |
-                           UART_CPU_INT_IMASK_BRKERR_SET |
-                           UART_CPU_INT_IMASK_OVRERR_SET;
-    NVIC_EnableIRQ(UART1_INT_IRQn);
+    *uart_reg(UART1_IFLS) = (*uart_reg(UART1_IFLS) & ~IFLS_RX_MASK) |
+                            IFLS_RX_LEVEL_1; // Interrupt FIFO Level-Select
+    *uart_reg(UART1_IMASK) = INT_RX | INT_FRMERR | INT_PARERR |
+                             INT_BRKERR | INT_OVRERR; // Errors enabled for framing, parity,
+                                                      // breaks, and overrun.
+    *reg(NVIC_ISER0) = (1U << 13U);
     return true;
   }
 
   void driver_write(std::span<std::uint8_t const> p_data) override
   {
     for (std::uint8_t const byte : p_data) {
-      while ((UART1->STAT & UART_STAT_TXFF_MASK) !=
-             UART_STAT_TXFF_CLEARED) {
-      }
-      UART1->TXDATA = byte; // Simply lists the byte UART tx will send
+      while ((*uart_reg(UART1_STAT) & STAT_TXFF) != 0U) {
+      } // Sends bits to byte as long as uart still sends data and transmission limit is not reached yet.
+      *uart_reg(UART1_TXDATA) = byte; // Sets value of data being transferred to byte
     }
   }
 
@@ -275,7 +384,7 @@ extern "C" void UART1_IRQHandler()
 {
   uart_serial_driver::handle_interrupt();
 }
-
+// Constructs driver here.
 static lab6::serial::settings const uart_settings{};  // 115200 baud, 8N1
 static uart_serial_driver uart_driver(uart_settings);
 
@@ -464,7 +573,8 @@ constexpr device_role this_device = device_role::sensor;
 int main()
 {
   std::printf("Hello, World\n");
-
+  // If statement checks if the UART driver is configured, failing should happen at
+  // the constructor, not the transfer function.
   if (!uart_driver.is_configured()) {
     std::printf("UART configuration failed\n");
   } else {
@@ -480,16 +590,17 @@ int main()
     while (uart_driver.receive_cursor() < expected_bytes && timeout-- != 0U) {
     }
 
+    auto const uart_debug = uart_serial_driver::debug_state();
     std::printf(
       "UART STAT=0x%08lX IIDX=0x%08lX cursor=%lu\n",
-      static_cast<unsigned long>(UART1->STAT),
-      static_cast<unsigned long>(UART1->CPU_INT.IIDX),
+      static_cast<unsigned long>(uart_debug.stat),
+      static_cast<unsigned long>(uart_debug.iidx),
       static_cast<unsigned long>(uart_driver.receive_cursor()));
     std::printf(
       "UART CTL0=0x%08lX CLKSEL=0x%08lX PWREN=0x%08lX\n",
-      static_cast<unsigned long>(UART1->CTL0),
-      static_cast<unsigned long>(UART1->CLKSEL),
-      static_cast<unsigned long>(UART1->GPRCM.PWREN));
+      static_cast<unsigned long>(uart_debug.ctl0),
+      static_cast<unsigned long>(uart_debug.clksel),
+      static_cast<unsigned long>(uart_debug.pwren));
 
     std::span<std::uint8_t const> const received =
       uart_driver.receive_buffer();
