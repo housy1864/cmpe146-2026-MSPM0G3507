@@ -36,7 +36,7 @@
 // The FreeRTOS task currently waiting for an ADC DMA transfer.
 static TaskHandle_t adc_waiting_task = nullptr;
 
-// Use DMA channel 0.
+// Use DMA channel 0 -- P55/120, 531
 static constexpr uint8_t adc_dma_channel = 0;
 
 class adc_driver : public lab5::adc16_stream
@@ -44,7 +44,7 @@ class adc_driver : public lab5::adc16_stream
 public:
     adc_driver()
     {
-        // 1. Reset and power up ADC0.
+        // 1. Reset and power up ADC0 -- P62/120
         DL_ADC12_reset(ADC0); 
         DL_ADC12_enablePower(ADC0);
 
@@ -119,7 +119,7 @@ public:
             .trigger = DMA_ADC0_EVT_GEN_BD_TRIG, //trigger source when adc says ready
             .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL, //wait for outside hardware
             .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE, //one result one time
-            .extendedMode = DL_DMA_NORMAL_MODE, //normal mode
+            .extendedMode = DL_DMA_NORMAL_MODE, //normal mode/fill/table
             .srcWidth = DL_DMA_WIDTH_HALF_WORD, //r16
             .destWidth = DL_DMA_WIDTH_HALF_WORD, //w16
             .srcIncrement = DL_DMA_ADDR_UNCHANGED, //r from same source
@@ -253,12 +253,11 @@ extern "C" void ADC0_IRQHandler()
             );
         }
 
-        portYIELD_FROM_ISR(higher_priority_task_woken);
+        portYIELD_FROM_ISR(higher_priority_task_woken); //FreeRTOS
     }
 }
 
 // Convert to temp
-
 #include <cmath>
 
 // Convert an expanded 16-bit ADC sample into temperature.
