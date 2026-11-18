@@ -109,8 +109,6 @@ public:
             DL_DMA_EVENT_CHANNEL0
         );
 
-NVIC_EnableIRQ(DMA_INT_IRQn);
-
         // Enable the DMA interrupt in the NVIC.
         NVIC_EnableIRQ(DMA_INT_IRQn);
 
@@ -239,9 +237,9 @@ extern "C" void DMA_IRQHandler(void)
     if (DL_DMA_getPendingInterrupt(DMA) ==
         DL_DMA_EVENT_IIDX_DMACH0)
     {
-        DL_DMA_clearEventsStatus(
+        DL_DMA_clearInterruptStatus(
             DMA,
-            DL_DMA_EVENT_CHANNEL0
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
         BaseType_t higher_priority_task_woken = pdFALSE;
