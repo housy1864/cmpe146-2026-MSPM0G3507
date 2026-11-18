@@ -557,104 +557,34 @@ int main()
   while (true) {
   }
 }*/
-  //TESTING MAIN
-/*static StaticTask_t adc_test_task_tcb;
+
+// 1. Task storage
+static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
+// 2. ADC test function
 void adc_test_task(void*)
 {
-    std::printf("ADC test task started!\n");
-
-    adc_driver adc;
-
-    std::array<std::uint16_t, samples_per_batch> samples{};
-
-    while (true)
-    {
-        std::printf("Starting ADC read...\n");
-
-        adc.read(samples);
-
-        std::printf("ADC read completed!\n");
-
-        for (std::size_t i = 0; i < samples.size(); i++)
-        {
-            std::printf("Sample %u: %u\n",
-                static_cast<unsigned>(i),
-                static_cast<unsigned>(samples[i]));
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}*/
-
-// Start ADC conversion.
-DL_ADC12_startConversion(ADC0);
-
-std::printf("ADC conversion started. Waiting for result...\n");
-
-// Wait for MEM0 result, but do not wait forever.
-uint32_t timeout = 1000000;
-
-while (
-    (DL_ADC12_getRawInterruptStatus(
-        ADC0,
-        DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-    ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
-    && timeout > 0
-)
-{
-    timeout--;
+    // Complete function above
 }
 
-// Check whether conversion completed.
-if (timeout == 0)
-{
-    std::printf("ERROR: ADC conversion timed out!\n");
-
-    std::printf(
-        "MEMRES0 register: %u\n",
-        (unsigned)(ADC0->ULLMEM.MEMRES[0] & 0x0FFF)
-    );
-
-    std::printf(
-        "ADC raw status: 0x%08lX\n",
-        (unsigned long)DL_ADC12_getRawInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-        )
-    );
-
-    DL_ADC12_stopConversion(ADC0);
-}
-else
-{
-    uint16_t raw = ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
-
-    std::printf("SUCCESS! Raw ADC result: %u\n", raw);
-
-    DL_ADC12_stopConversion(ADC0);
-}
-
+// 3. Main
 int main()
 {
-  // Start the ADC test task.
-  xTaskCreateStatic(
-      adc_test_task,
-      "adc_test_task",
-      task_stack_words,
-      nullptr,
-      tskIDLE_PRIORITY + 1,
-      adc_test_task_stack,
-      &adc_test_task_tcb
-  );
+    xTaskCreateStatic(
+        adc_test_task,
+        "adc_test_task",
+        task_stack_words,
+        nullptr,
+        tskIDLE_PRIORITY + 1,
+        adc_test_task_stack,
+        &adc_test_task_tcb
+    );
 
-    // Start FreeRTOS.
     vTaskStartScheduler();
 
     while (true)
     {
     }
-    
-  }
+}
 
