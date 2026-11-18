@@ -35,6 +35,9 @@
 // The FreeRTOS task currently waiting for an ADC DMA transfer.
 static TaskHandle_t adc_waiting_task = nullptr;
 
+// Adding a diagonstic flag
+static volatile bool adc_read_success = false;
+
 // Use DMA channel 0.
 static constexpr uint8_t adc_dma_channel = 0;
 
@@ -149,82 +152,61 @@ private:
         );
     }
 
-    // Global diagonstic flag
-    static bool adc_read_success = false;
-
     void driver_read(std::span<std::uint16_t> buffer) override
-    {
-        adc_read_success = false;
+  {
+      adc_read_success = false;
 
-        if (buffer.empty())
-        {
-            return;
-        }
+      if (buffer.empty())
+          return;
 
-        // Disable DMA before changing transfer settings.
-        DL_DMA_disableChannel(DMA, adc_dma_channel);
+      DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-        // Set the destination to the caller's buffer.
-        DL_DMA_setDestAddr(
-            DMA,
-            adc_dma_channel,
-            static_cast<uint32_t>(
-                reinterpret_cast<uintptr_t>(buffer.data())
-            )
-        );
+      DL_DMA_setDestAddr(
+          DMA,
+          adc_dma_channel,
+          static_cast<uint32_t>(
+              reinterpret_cast<uintptr_t>(buffer.data())
+          )
+      );
 
-        // Transfer one 16-bit ADC result per trigger.
-        DL_DMA_setTransferSize(
-            DMA,
-            adc_dma_channel,
-            static_cast<uint16_t>(buffer.size())
-        );
+      DL_DMA_setTransferSize(
+          DMA,
+          adc_dma_channel,
+          static_cast<uint16_t>(buffer.size())
+      );
 
-        // Remember which task must be awakened after sampling.
-        adc_waiting_task = xTaskGetCurrentTaskHandle();
+      // Clear any previous task notification.
+      ulTaskNotifyTake(pdTRUE, 0);
 
-        // Re-enable DMA and ADC DMA requests.
-        DL_DMA_enableChannel(DMA, adc_dma_channel);
-        DL_ADC12_enableDMA(ADC0);
+      adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-        // Start repeated ADC conversions.
-        DL_ADC12_startConversion(ADC0);
+      DL_DMA_enableChannel(DMA, adc_dma_channel);
+      DL_ADC12_enableDMA(ADC0);
+      DL_ADC12_startConversion(ADC0);
 
-        // Sleep until the ADC interrupt notifies this task.
-        // Wait up to 1 second for the ADC interrupt.
-        uint32_t notification = ulTaskNotifyTake(
-            pdTRUE,
-            pdMS_TO_TICKS(1000)
-        );
-        std::printf("Raw DMA sample 0: %u\n", buffer[0]);
-        std::printf("Raw DMA sample 1: %u\n", buffer[1]);
-        std::printf("Raw DMA sample 2: %u\n", buffer[2]);
+      // Wait up to one second for completion.
+      uint32_t notification =
+          ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
 
-        if (notification == 0)
-        {
-            std::printf("ERROR: ADC DMA timeout!\n");
+      DL_ADC12_stopConversion(ADC0);
+      DL_ADC12_disableDMA(ADC0);
+      DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-            DL_ADC12_stopConversion(ADC0);
-            DL_ADC12_disableDMA(ADC0);
-            DL_DMA_disableChannel(DMA, adc_dma_channel);
+      adc_waiting_task = nullptr;
 
-            adc_waiting_task = nullptr;
-            return;
-        }
+      if (notification == 0)
+      {
+          std::printf("ERROR: ADC DMA timeout!\n");
+          return;
+      }
 
-        std::printf("ADC interrupt received!\n");
+      adc_read_success = true;
 
-        DL_ADC12_stopConversion(ADC0);
-        DL_ADC12_disableDMA(ADC0);
-
-        // Convert all 12-bit values to the required 16-bit format.
-        for (auto& sample : buffer)
-        {
-            sample = upscale_12_to_16(sample);
-        }
-    }
-
-    adc_read_success = true;
+      for (auto& sample : buffer)
+      {
+          sample = upscale_12_to_16(sample);
+      }
+  }
 
 };
 
