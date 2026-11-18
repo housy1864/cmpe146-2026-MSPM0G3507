@@ -120,6 +120,15 @@ public:
             .destIncrement = DL_DMA_ADDR_INCREMENT,
         };
 
+        DL_DMA_setSrcAddr(
+        DMA,
+        DMA_CH0_CHAN_ID,
+        DL_ADC12_getMemResultAddress(
+            ADC0,
+            DL_ADC12_MEM_IDX_0
+            )
+        );
+
         DL_DMA_initChannel(
             DMA,
             adc_dma_channel,
