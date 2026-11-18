@@ -551,6 +551,12 @@ void adc_test_task(void*)
 
         adc.read(samples.data(), samples.size());
 
+        if (!adc_read_success) {
+            std::printf("ADC transfer failed\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
         std::printf("ADC read completed!\n");
 
         for (std::size_t i = 0; i < samples.size(); i++)
