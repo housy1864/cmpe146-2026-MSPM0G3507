@@ -588,42 +588,52 @@ void adc_test_task(void*)
     }
 }*/
 
-void adc_test_task(void*)
+// Start ADC conversion.
+DL_ADC12_startConversion(ADC0);
+
+std::printf("ADC conversion started. Waiting for result...\n");
+
+// Wait for MEM0 result, but do not wait forever.
+uint32_t timeout = 1000000;
+
+while (
+    (DL_ADC12_getRawInterruptStatus(
+        ADC0,
+        DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+    ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
+    && timeout > 0
+)
 {
-    std::printf("ADC CPU test started!\n");
+    timeout--;
+}
 
-    adc_driver adc;
+// Check whether conversion completed.
+if (timeout == 0)
+{
+    std::printf("ERROR: ADC conversion timed out!\n");
 
-    while (true)
-    {
-        // Clear previous conversion flag.
-        DL_ADC12_clearInterruptStatus(
+    std::printf(
+        "MEMRES0 register: %u\n",
+        (unsigned)(ADC0->ULLMEM.MEMRES[0] & 0x0FFF)
+    );
+
+    std::printf(
+        "ADC raw status: 0x%08lX\n",
+        (unsigned long)DL_ADC12_getRawInterruptStatus(
             ADC0,
             DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-        );
-
-        // Start ADC conversion.
-        DL_ADC12_startConversion(ADC0);
-
-        // Wait for MEM0 to receive a new result.
-        while (
-            (DL_ADC12_getRawInterruptStatus(
-                ADC0,
-                DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-            ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
         )
-        {
-        }
+    );
 
-        // Read the actual hardware result register.
-        uint16_t raw = ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
+    DL_ADC12_stopConversion(ADC0);
+}
+else
+{
+    uint16_t raw = ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
 
-        DL_ADC12_stopConversion(ADC0);
+    std::printf("SUCCESS! Raw ADC result: %u\n", raw);
 
-        std::printf("Raw ADC result: %u\n", raw);
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-  }
+    DL_ADC12_stopConversion(ADC0);
 }
 
 int main()
