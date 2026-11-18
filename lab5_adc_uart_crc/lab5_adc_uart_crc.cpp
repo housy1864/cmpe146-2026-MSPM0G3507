@@ -433,8 +433,21 @@ enum class device_role : std::uint8_t
   display,
 };
 
-constexpr device_role this_device = device_role::sensor;
+//constexpr device_role this_device = device_role::sensor;
 }  // namespace
+
+if constexpr (this_device == device_role::sensor)
+{
+    xTaskCreateStatic(
+        adc_test_task,
+        "adc_test_task",
+        task_stack_words,
+        nullptr,
+        tskIDLE_PRIORITY + 1,
+        adc_test_task_stack,
+        &adc_test_task_tcb
+    );
+}
 
 int main()
 {
@@ -465,4 +478,33 @@ int main()
   // project's dpl/StaticAllocs_freertos.c - don't redefine them here.
   while (true) {
   }
+}
+
+//======================================================================
+// TESTING
+//======================================================================
+void adc_test_task(void*)
+{
+    adc_driver adc;
+
+    std::array<std::uint16_t, 64> samples{};
+
+    while (true)
+    {
+        // Collect 64 ADC readings.
+        adc.read(samples);
+
+        // Print the readings.
+        for (std::size_t i = 0; i < samples.size(); i++)
+        {
+            std::printf("Sample %u: %u\n",
+                static_cast<unsigned>(i),
+                static_cast<unsigned>(samples[i]));
+        }
+
+        std::printf("ADC batch complete!\n");
+
+        // Wait before taking another batch.
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 }
