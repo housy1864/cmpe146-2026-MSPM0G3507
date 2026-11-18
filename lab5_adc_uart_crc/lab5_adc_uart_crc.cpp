@@ -131,8 +131,7 @@ public:
             DL_ADC12_INTERRUPT_DMA_DONE
 );
 
-        NVIC_SetPriority(DMA_INT_IRQn, 3);
-        NVIC_EnableIRQ(DMA_INT_IRQn);
+        NVIC_EnableIRQ(ADC0_INT_IRQn);
 
         // 9. Enable ADC conversions.
         DL_ADC12_enableConversions(ADC0);
