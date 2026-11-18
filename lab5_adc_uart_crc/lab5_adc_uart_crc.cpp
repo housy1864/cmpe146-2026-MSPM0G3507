@@ -31,15 +31,204 @@
 //     task's handle, start the conversion, then sleep with ulTaskNotifyTake()
 //     until ADC0_IRQHandler() wakes you. Upscale each 12-bit sample to 16 bits
 //     before returning.
-class adc_driver
-{};
+
+// The FreeRTOS task currently waiting for an ADC DMA transfer.
+static TaskHandle_t adc_waiting_task = nullptr;
+
+// Use DMA channel 0.
+static constexpr uint8_t adc_dma_channel = 0;
+
+class adc_driver : public lab5::adc16_stream
+{
+public:
+    adc_driver()
+    {
+        // 1. Reset and power up ADC0.
+        DL_ADC12_reset(ADC0);
+        DL_ADC12_enablePower(ADC0);
+
+        // Allow the ADC peripheral to power up.
+        delay_cycles(16000);
+
+        // 2. Configure ADC clock: SYSOSC, 24-32 MHz, divide by 1.
+        static const DL_ADC12_ClockConfig clock_config = {
+            .clockSel = DL_ADC12_CLOCK_SYSOSC,
+            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
+            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1,
+        };
+
+        DL_ADC12_setClockConfig(ADC0, &clock_config);
+
+        // 3. Configure repeated, software-triggered, 12-bit conversions.
+        DL_ADC12_initSingleSample(
+            ADC0,
+            DL_ADC12_REPEAT_MODE_ENABLED,
+            DL_ADC12_SAMPLING_SOURCE_MANUAL,
+            DL_ADC12_TRIG_SRC_SOFTWARE,
+            DL_ADC12_SAMP_CONV_RES_12_BIT,
+            DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED
+        );
+
+        // 4. Configure MEM0 for the internal temperature sensor.
+        DL_ADC12_configConversionMem(
+            ADC0,
+            DL_ADC12_MEM_IDX_0,
+            DL_ADC12_INPUT_CHAN_11,
+            DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+            DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+            DL_ADC12_AVERAGING_MODE_DISABLED,
+            DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+            DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+            DL_ADC12_WINDOWS_COMP_MODE_DISABLED
+        );
+
+        // 5. Set the ADC sample time.
+        // At 32 MHz, 400 ADC clock cycles = 12.5 microseconds.
+        DL_ADC12_setSampleTime0(ADC0, 400);
+
+        // 6. Configure ADC DMA requests.
+        // One ADC result is transferred for each DMA request.
+        DL_ADC12_setDMASamplesCnt(ADC0, 1);
+
+        DL_ADC12_enableDMATrigger(
+            ADC0,
+            DL_ADC12_DMA_MEM0_RESULT_LOADED
+        );
+
+        // Enable the ADC DMA-complete interrupt.
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        DL_ADC12_enableInterrupt(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        NVIC_EnableIRQ(ADC0_INT_IRQn);
+
+        // 7. Configure DMA channel 0.
+        static const DL_DMA_Config dma_config = {
+            .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
+            .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+            .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
+            .extendedMode = DL_DMA_NORMAL_MODE,
+            .srcWidth = DL_DMA_WIDTH_HALF_WORD,
+            .destWidth = DL_DMA_WIDTH_HALF_WORD,
+            .srcIncrement = DL_DMA_ADDR_UNCHANGED,
+            .destIncrement = DL_DMA_ADDR_INCREMENT,
+        };
+
+        DL_DMA_initChannel(
+            DMA,
+            adc_dma_channel,
+            &dma_config
+        );
+
+        // ADC result register is the fixed DMA source.
+        DL_DMA_setSrcAddr(
+            DMA,
+            adc_dma_channel,
+            DL_ADC12_getMemResultAddress(
+                ADC0,
+                DL_ADC12_MEM_IDX_0
+            )
+        );
+
+        // 8. Enable ADC conversions.
+        DL_ADC12_enableConversions(ADC0);
+    }
+
+private:
+    // Expand a 12-bit ADC value to the 16-bit format required by adc.hpp.
+    static std::uint16_t upscale_12_to_16(std::uint16_t value)
+    {
+        return static_cast<std::uint16_t>(
+            (value << 4) | (value >> 8)
+        );
+    }
+
+    void driver_read(std::span<std::uint16_t> buffer) override
+    {
+        if (buffer.empty())
+        {
+            return;
+        }
+
+        // Disable DMA before changing transfer settings.
+        DL_DMA_disableChannel(DMA, adc_dma_channel);
+
+        // Set the destination to the caller's buffer.
+        DL_DMA_setDestAddr(
+            DMA,
+            adc_dma_channel,
+            static_cast<uint32_t>(
+                reinterpret_cast<uintptr_t>(buffer.data())
+            )
+        );
+
+        // Transfer one 16-bit ADC result per trigger.
+        DL_DMA_setTransferSize(
+            DMA,
+            adc_dma_channel,
+            static_cast<uint16_t>(buffer.size())
+        );
+
+        // Remember which task must be awakened after sampling.
+        adc_waiting_task = xTaskGetCurrentTaskHandle();
+
+        // Re-enable DMA and ADC DMA requests.
+        DL_DMA_enableChannel(DMA, adc_dma_channel);
+        DL_ADC12_enableDMA(ADC0);
+
+        // Start repeated ADC conversions.
+        DL_ADC12_startConversion(ADC0);
+
+        // Sleep until the ADC interrupt notifies this task.
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // Stop conversions after the transfer finishes.
+        DL_ADC12_stopConversion(ADC0);
+        DL_ADC12_disableDMA(ADC0);
+
+        // Convert all 12-bit values to the required 16-bit format.
+        for (auto& sample : buffer)
+        {
+            sample = upscale_12_to_16(sample);
+        }
+    }
+};
+
 
 // TODO(lab, role 1): Store the handle of the task waiting in
 // adc_driver::driver_read() somewhere this handler can reach. When
 // DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
+// ADC interrupt handler.
 extern "C" void ADC0_IRQHandler()
-{}
+{
+    if (DL_ADC12_getPendingInterrupt(ADC0) ==
+        DL_ADC12_IIDX_DMA_DONE)
+    {
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+        );
+
+        BaseType_t higher_priority_task_woken = pdFALSE;
+
+        if (adc_waiting_task != nullptr)
+        {
+            vTaskNotifyGiveFromISR(
+                adc_waiting_task,
+                &higher_priority_task_woken
+            );
+        }
+
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
+}
 
 // =============================================================================
 // Role 2: UART
