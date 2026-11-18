@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 #include "../third_party/span/span.hpp"
 
@@ -51,12 +52,14 @@ public:
    * @param p_buffer - buffer to fill with consecutive ADC samples. The
    * number of samples taken is p_buffer.size().
    */
-  void read(std::span<std::uint16_t> p_buffer)
+  virtual void read(uint16_t* buffer, size_t length)
   {
-    driver_read(p_buffer);
+    driver_read(buffer, length);
   }
 
-private:
-  virtual void driver_read(std::span<std::uint16_t> p_buffer) = 0;
-};
+  virtual ~adc16_stream() = default;
+
+  private:
+    virtual void driver_read(uint16_t* buffer, size_t length) = 0;
+  };
 }  // namespace lab5

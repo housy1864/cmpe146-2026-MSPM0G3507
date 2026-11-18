@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
-#include <span>
 #include <cmath>
 
 #include "FreeRTOS.h"
@@ -119,7 +118,7 @@ public:
   }
 
 private:
-  void driver_read(std::span<std::uint16_t> buffer) override
+  void driver_read(uint16_t* buffer, size_t length) override
   {
     if (buffer.empty()) return;
 
@@ -355,7 +354,7 @@ void sampler_task(void*)
 
       // 2. Collect 64 ADC samples using DMA.
       // This call sleeps until the DMA interrupt finishes.
-      adc.read(raw_samples);
+      adc.read(raw_samples.data(), raw_samples.size());
 
       // 3. Convert all 64 ADC samples into temperatures.
       for (std::size_t i = 0; i < samples_per_batch; i++)
