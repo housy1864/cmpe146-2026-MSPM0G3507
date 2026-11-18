@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -256,6 +257,54 @@ extern "C" void ADC0_IRQHandler()
     }
 }
 
+// Convert to temp
+
+#include <cmath>
+
+// Convert an expanded 16-bit ADC sample into temperature.
+// Output format: signed integer in units of 0.1 degrees Celsius.
+static std::int16_t convert_to_temperature(
+    std::uint16_t sample,
+    std::uint16_t calibration_code)
+{
+    // Recover the original 12-bit ADC result.
+    const std::uint16_t adc_code = sample >> 4;
+
+    // Convert both ADC codes into voltages.
+    constexpr float reference_voltage = 3.3f;
+    constexpr float adc_full_scale = 4096.0f;
+
+    const float sample_voltage =
+        (static_cast<float>(adc_code) / adc_full_scale)
+        * reference_voltage;
+
+    const float trim_voltage =
+        (static_cast<float>(calibration_code) / adc_full_scale)
+        * reference_voltage;
+
+    // Factory trim temperature and sensor temperature coefficient.
+    constexpr float trim_temperature_c = 30.0f;
+    constexpr float temperature_coefficient = -0.0018f;
+
+    // Calculate temperature in degrees Celsius.
+    const float temperature_c =
+        trim_temperature_c +
+        (sample_voltage - trim_voltage) / temperature_coefficient;
+
+    // Encode temperature in tenths of a degree Celsius.
+    const long scaled_temperature = std::lround(temperature_c * 10.0f);
+
+    // Keep the result within the int16_t range.
+    if (scaled_temperature > 32767)
+        return 32767;
+
+    if (scaled_temperature < -32768)
+        return -32768;
+
+    return static_cast<std::int16_t>(scaled_temperature);
+}
+
+
 // =============================================================================
 // Role 2: UART
 // =============================================================================
@@ -271,45 +320,6 @@ extern "C" void ADC0_IRQHandler()
 // you pick (UART0 through UART3).
 class serial_driver
 {};
-
-// Convert to temperature
-// Convert an ADC reading into temperature in units of 0.1 degrees Celsius.
-static std::int16_t convert_to_temperature(std::uint16_t sample)
-{
-    // The ADC result was expanded from 12 bits to 16 bits.
-    // Recover the original 12-bit ADC code.
-    const std::uint16_t sample_code = sample >> 4;
-
-    // Factory calibration code measured at 30 degrees Celsius.
-    const std::uint16_t trim =
-        DL_SYSCTL_getTempCalibrationConstant();
-
-    // Convert the ADC difference into degrees Celsius.
-    constexpr float reference_voltage = 3.3f;
-    constexpr float adc_max_code = 4096.0f;
-    constexpr float sensor_slope = -0.0018f;
-
-    const float sample_voltage =
-        reference_voltage * sample_code / adc_max_code;
-
-    const float trim_voltage =
-        reference_voltage * trim / adc_max_code;
-
-    const float temperature_c =
-        30.0f + (sample_voltage - trim_voltage) / sensor_slope;
-
-    // Store temperature in tenths of a degree Celsius.
-    // Example: 25.3 C becomes 253.
-    const float scaled_temperature = temperature_c * 10.0f;
-
-    if (scaled_temperature > 32767.0f)
-        return 32767;
-
-    if (scaled_temperature < -32768.0f)
-        return -32768;
-
-    return static_cast<std::int16_t>(scaled_temperature + 0.5f);
-}
 
 // =============================================================================
 // Role 3: CRC
@@ -422,6 +432,10 @@ void sampler_task(void*)
     std::array<std::uint16_t, samples_per_batch> raw_samples{};
     temperature_batch batch{};
 
+    // Read the factory temperature calibration value.
+    const std::uint16_t calibration_code =
+    DL_SYSCTL_getTempCalibrationConstant();
+
     while (true)
     {
         // Wait for a request to collect a new batch.
@@ -433,7 +447,10 @@ void sampler_task(void*)
         // Convert every sample into temperature.
         for (std::size_t i = 0; i < samples_per_batch; ++i)
         {
-            batch[i] = convert_to_temperature(raw_samples[i]);
+            batch[i] = convert_to_temperature(
+                raw_samples[i],
+                calibration_code
+            );
         }
 
         // Send the completed batch to the next task.
@@ -541,7 +558,8 @@ int main()
   }
 }*/
 
-// 1. Task storage
+// =========================== Role 1 Tester =====================================
+ 1. Task storage
 static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
