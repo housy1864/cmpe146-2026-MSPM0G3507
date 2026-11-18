@@ -505,9 +505,9 @@ enum class device_role : std::uint8_t
 }  // namespace
 
 //constexpr (this_device == device_role::sensor)
-{
 
-}
+static StaticTask_t adc_test_task_tcb;
+static StackType_t adc_test_task_stack[task_stack_words];
 
 void adc_test_task(void*);
 
@@ -523,15 +523,15 @@ int main()
     // request_task and transmit_task share one serial_driver. main()'s stack
     // is reused once the scheduler starts, so don't make it a local here.
 
-    xTaskCreateStatic(
-        adc_test_task,
-        "adc_test_task",
-        task_stack_words,
-        nullptr,
-        tskIDLE_PRIORITY + 1,
-        adc_test_task_stack,
-        &adc_test_task_tcb
-    );
+  xTaskCreateStatic(
+      adc_test_task,
+      "adc_test_task",
+      task_stack_words,
+      nullptr,
+      tskIDLE_PRIORITY + 1,
+      adc_test_task_stack,
+      &adc_test_task_tcb
+  );
 
   vTaskStartScheduler();
 
