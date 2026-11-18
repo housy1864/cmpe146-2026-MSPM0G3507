@@ -557,10 +557,8 @@ int main()
   }
 }*/
   //TESTING MAIN
-static StaticTask_t adc_test_task_tcb;
+/*static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
-
-void adc_test_task(void*);
 
 void adc_test_task(void*)
 {
@@ -608,6 +606,43 @@ int main()
     while (true)
     {
     }
-
     
+  }*/
+
+void adc_test_task(void*)
+{
+    std::printf("ADC CPU test started!\n");
+
+    adc_driver adc;
+
+    while (true)
+    {
+        // Clear previous conversion flag.
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+        );
+
+        // Start ADC conversion.
+        DL_ADC12_startConversion(ADC0);
+
+        // Wait for MEM0 to receive a new result.
+        while (
+            (DL_ADC12_getRawInterruptStatus(
+                ADC0,
+                DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
+            ) & DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0
+        )
+        {
+        }
+
+        // Read the actual hardware result register.
+        uint16_t raw = ADC0->ULLMEM.MEMRES[0] & 0x0FFF;
+
+        DL_ADC12_stopConversion(ADC0);
+
+        std::printf("Raw ADC result: %u\n", raw);
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
