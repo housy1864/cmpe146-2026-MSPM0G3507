@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <span>
+#include <cmath>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -106,11 +107,11 @@ public:
       .destIncrement = DL_DMA_ADDR_INCREMENT
     };
 
-    DL_DMA_initChannel(DMA, DL_DMA_CHAN_ID_0, &dma_config);
+    DL_DMA_initChannel(DMA, adc_dma_channel, &dma_config);
 
     DL_DMA_setSrcAddr(
       DMA,
-      DL_DMA_CHAN_ID_0,
+      adc_dma_channel,
       DL_ADC12_getMemResultAddress(ADC0, DL_ADC12_MEM_IDX_0)
     );
 
@@ -123,17 +124,17 @@ private:
     if (buffer.empty()) return;
 
     // Prepare DMA for this buffer.
-    DL_DMA_disableChannel(DMA, DL_DMA_CHAN_ID_0);
+    DL_DMA_disableChannel(DMA, adc_dma_channel);
 
     DL_DMA_setDestAddr(
       DMA,
-      DL_DMA_CHAN_ID_0,
+      adc_dma_channel,
       reinterpret_cast<std::uint32_t>(buffer.data())
     );
 
     DL_DMA_setTransferSize(
       DMA,
-      DL_DMA_CHAN_ID_0,
+      adc_dma_channel,
       static_cast<std::uint16_t>(buffer.size())
     );
 
@@ -330,6 +331,7 @@ void request_task(void*)
 //   3. Convert each raw sample into a temperature_batch. See "Temperature
 //      conversion" in the README for the calibration constants.
 //   4. xQueueSend(batch_queue, &batch, portMAX_DELAY)
+
 void sampler_task(void*)
 {
   // Create our ADC driver.
@@ -340,6 +342,11 @@ void sampler_task(void*)
 
   // Buffer for 64 converted temperature measurements.
   temperature_batch temperatures;
+
+  const std::uint16_t calibration_code =
+      static_cast<std::uint16_t>(
+          DL_SYSCTL_getTempCalibrationConstant()
+      );
 
   while (true)
   {
@@ -354,7 +361,7 @@ void sampler_task(void*)
       for (std::size_t i = 0; i < samples_per_batch; i++)
       {
           temperatures[i] =
-              convert_temperature(raw_samples[i]);
+              convert_temperature(raw_samples[i], calibration_code);
       }
 
       // 4. Send the temperature batch to the queue.
