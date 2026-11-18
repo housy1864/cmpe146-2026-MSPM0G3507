@@ -269,9 +269,9 @@ static std::int16_t convert_to_temperature(
     // Recover the original 12-bit ADC result.
     const std::uint16_t adc_code = sample >> 4;
 
-    // Convert both ADC codes into voltages.
+    // Convert both ADC codes into voltages -- P41/120
     constexpr float reference_voltage = 3.3f;
-    constexpr float adc_full_scale = 4096.0f;
+    constexpr float adc_full_scale = 4096.0f; //2^12
 
     const float sample_voltage =
         (static_cast<float>(adc_code) / adc_full_scale)
