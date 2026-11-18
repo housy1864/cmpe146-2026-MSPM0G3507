@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <span>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -32,199 +33,131 @@
 //     until ADC0_IRQHandler() wakes you. Upscale each 12-bit sample to 16 bits
 //     before returning.
 
-// The FreeRTOS task currently waiting for an ADC DMA transfer.
+// The task that is currently waiting for the ADC/DMA transfer.
 static TaskHandle_t adc_waiting_task = nullptr;
-
-// Adding a diagonstic flag
-static volatile bool adc_read_success = false;
-
-// Use DMA channel 0.
-static constexpr uint8_t adc_dma_channel = 0;
 
 class adc_driver : public lab5::adc16_stream
 {
 public:
-    adc_driver()
-    {
-        // 1. Reset and power up ADC0.
-        DL_ADC12_reset(ADC0);
-        DL_ADC12_enablePower(ADC0);
+  adc_driver()
+  {
+    // 1. Reset and power up ADC0.
+    DL_ADC12_reset(ADC0);
+    DL_ADC12_enablePower(ADC0);
 
-        // Allow the ADC peripheral to power up.
-        delay_cycles(16000);
+    // 2. Configure ADC clock: SYSOSC.
+    DL_ADC12_ClockConfig clock_config = {
+      .clockSel = DL_ADC12_CLOCK_SYSOSC,
+      .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
+      .divideRatio = DL_ADC12_CLOCK_DIVIDE_1
+    };
+    DL_ADC12_setClockConfig(ADC0, &clock_config);
 
-        // 2. Configure ADC clock: SYSOSC, 24-32 MHz, divide by 1.
-        static const DL_ADC12_ClockConfig clock_config = {
-            .clockSel = DL_ADC12_CLOCK_SYSOSC,
-            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
-            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1,
-        };
+    // 3. Configure one 12-bit unsigned conversion,
+    //    software-triggered, with repeat enabled.
+    DL_ADC12_initSingleSample(
+      ADC0,
+      DL_ADC12_REPEAT_MODE_ENABLED,
+      DL_ADC12_SAMPLING_SOURCE_MANUAL,
+      DL_ADC12_TRIG_SRC_SOFTWARE,
+      DL_ADC12_SAMP_CONV_RES_12_BIT,
+      DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED
+    );
 
-        DL_ADC12_setClockConfig(ADC0, &clock_config);
+    // 4. Configure MEM0 to read the internal temperature sensor.
+    DL_ADC12_configConversionMem(
+      ADC0,
+      DL_ADC12_MEM_IDX_0,
+      DL_ADC12_INPUT_CHAN_11,
+      DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+      DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+      DL_ADC12_AVERAGING_MODE_DISABLED,
+      DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+      DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+      DL_ADC12_WINDOWS_COMP_MODE_DISABLED
+    );
 
-        // 3. Configure repeated, software-triggered, 12-bit conversions.
-        DL_ADC12_initSingleSample(
-            ADC0,
-            DL_ADC12_REPEAT_MODE_ENABLED,
-            DL_ADC12_SAMPLING_SOURCE_MANUAL,
-            DL_ADC12_TRIG_SRC_SOFTWARE,
-            DL_ADC12_SAMP_CONV_RES_12_BIT,
-            DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED
-        );
+    // 5. Set sampling time.
+    // 400 cycles at 32 MHz = 12.5 us.
+    DL_ADC12_setSampleTime0(ADC0, 400);
 
-        // 4. Configure MEM0 for the internal temperature sensor.
-        DL_ADC12_configConversionMem(
-            ADC0,
-            DL_ADC12_MEM_IDX_0,
-            DL_ADC12_INPUT_CHAN_11,
-            DL_ADC12_REFERENCE_VOLTAGE_VDDA,
-            DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
-            DL_ADC12_AVERAGING_MODE_DISABLED,
-            DL_ADC12_BURN_OUT_SOURCE_DISABLED,
-            DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
-            DL_ADC12_WINDOWS_COMP_MODE_DISABLED
-        );
+    // 6. Configure ADC DMA triggering.
+    DL_ADC12_setDMASamplesCnt(ADC0, 1);
+    DL_ADC12_enableDMATrigger(
+      ADC0, DL_ADC12_DMA_MEM0_RESULT_LOADED
+    );
 
-        // 5. Set the ADC sample time.
-        // At 32 MHz, 400 ADC clock cycles = 12.5 microseconds.
-        DL_ADC12_setSampleTime0(ADC0, 400);
+    // ADC DMA completion interrupt.
+    DL_ADC12_enableInterrupt(ADC0, DL_ADC12_INTERRUPT_DMA_DONE);
+    NVIC_EnableIRQ(ADC0_INT_IRQn);
 
-        // 6. Configure ADC DMA requests.
-        // One ADC result is transferred for each DMA request.
-        DL_ADC12_setDMASamplesCnt(ADC0, 1);
+    // 7. Configure DMA channel.
+    // The exact channel and trigger identifiers must match the
+    // device definitions in your installed SDK.
+    DL_DMA_Config dma_config = {
+      .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
+      .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+      .transferMode = DL_DMA_SINGLE_TRANSFER_MODE,
+      .extendedMode = DL_DMA_NORMAL_MODE,
+      .srcWidth = DL_DMA_WIDTH_HALF_WORD,
+      .destWidth = DL_DMA_WIDTH_HALF_WORD,
+      .srcIncrement = DL_DMA_ADDR_UNCHANGED,
+      .destIncrement = DL_DMA_ADDR_INCREMENT
+    };
 
-        DL_ADC12_enableDMATrigger(
-            ADC0,
-            DL_ADC12_DMA_MEM0_RESULT_LOADED
-        );
+    DL_DMA_initChannel(DMA, DMA_CH0_CHAN_ID, &dma_config);
 
-        // 7. Configure DMA channel 0.
-        static const DL_DMA_Config dma_config = {
-            .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
-            .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
-            .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
-            .extendedMode = DL_DMA_NORMAL_MODE,
-            .srcWidth = DL_DMA_WIDTH_HALF_WORD,
-            .destWidth = DL_DMA_WIDTH_HALF_WORD,
-            .srcIncrement = DL_DMA_ADDR_UNCHANGED,
-            .destIncrement = DL_DMA_ADDR_INCREMENT,
-        };
+    DL_DMA_setSrcAddr(
+      DMA,
+      DMA_CH0_CHAN_ID,
+      DL_ADC12_getMemResultAddress(ADC0, DL_ADC12_MEM_IDX_0)
+    );
 
-        DL_DMA_initChannel(
-            DMA,
-            adc_dma_channel,
-            &dma_config
-        );
-
-        // ADC result register is the fixed DMA source.
-        DL_DMA_setSrcAddr(
-            DMA,
-            adc_dma_channel,
-            DL_ADC12_getMemResultAddress(
-                ADC0,
-                DL_ADC12_MEM_IDX_0
-            )
-        );
-
-        // Clear and enable the DMA channel 0 CPU interrupt.
-        DL_DMA_clearInterruptStatus(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
-        );
-
-        DL_DMA_enableInterrupt(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
-        );
-
-        NVIC_SetPriority(DMA_INT_IRQn, 3);
-        NVIC_EnableIRQ(DMA_INT_IRQn);
-
-        DL_ADC12_enableConversions(ADC0);
-
-        // 8. Enable ADC conversions.
-        DL_ADC12_enableConversions(ADC0);
-    }
+    DL_ADC12_enableConversions(ADC0);
+  }
 
 private:
-    // Expand a 12-bit ADC value to the 16-bit format required by adc.hpp.
-    static std::uint16_t upscale_12_to_16(std::uint16_t value)
-    {
-        return static_cast<std::uint16_t>(
-            (value << 4) | (value >> 8)
-        );
-    }
+  void driver_read(std::span<std::uint16_t> buffer) override
+  {
+    if (buffer.empty()) return;
 
-void driver_read(std::span<std::uint16_t> buffer) override
-{
-    adc_read_success = false;
+    // Prepare DMA for this buffer.
+    DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
 
-    if (buffer.empty())
-        return;
-
-    // Disable DMA before reconfiguring the transfer.
-    DL_DMA_disableChannel(DMA, adc_dma_channel);
-
-    // Set destination buffer.
     DL_DMA_setDestAddr(
-        DMA,
-        adc_dma_channel,
-        static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(buffer.data())
-        )
+      DMA,
+      DMA_CH0_CHAN_ID,
+      reinterpret_cast<std::uint32_t>(buffer.data())
     );
 
-    // Transfer the requested number of 16-bit samples.
     DL_DMA_setTransferSize(
-        DMA,
-        adc_dma_channel,
-        static_cast<uint16_t>(buffer.size())
+      DMA,
+      DMA_CH0_CHAN_ID,
+      static_cast<std::uint16_t>(buffer.size())
     );
 
-    // Clear stale notifications and DMA interrupt status.
-    ulTaskNotifyTake(pdTRUE, 0);
-
-    DL_DMA_clearInterruptStatus(
-        DMA,
-        DL_DMA_INTERRUPT_CHANNEL0
-    );
-
-    // Save the task that must be awakened.
+    // Save the task before starting the conversion.
     adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-    // Start DMA and ADC.
-    DL_DMA_enableChannel(DMA, adc_dma_channel);
+    DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
     DL_ADC12_enableDMA(ADC0);
+
     DL_ADC12_startConversion(ADC0);
 
-    // Wait for DMA channel completion.
-    uint32_t notification = ulTaskNotifyTake(
-        pdTRUE,
-        pdMS_TO_TICKS(1000)
-    );
+    // Sleep until the interrupt wakes this task.
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    // Stop the peripherals.
     DL_ADC12_stopConversion(ADC0);
-    DL_ADC12_disableDMA(ADC0);
-    DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-    adc_waiting_task = nullptr;
-
-    if (notification == 0)
-    {
-        std::printf("ERROR: DMA channel 0 timeout!\n");
-        return;
-    }
-
-    // Convert all 12-bit samples to 16-bit samples.
+    // Convert 12-bit values to the 16-bit interface format.
     for (auto& sample : buffer)
     {
-        sample = upscale_12_to_16(sample);
+      std::uint16_t value = sample & 0x0FFF;
+      sample = static_cast<std::uint16_t>(
+        (value << 4) | (value >> 8)
+      );
     }
-
-    adc_read_success = true;
-}
-
+  }
 };
 
 
@@ -234,71 +167,44 @@ void driver_read(std::span<std::uint16_t> buffer) override
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
 // ADC interrupt handler.
-extern "C" void DMA_IRQHandler(void)
+extern "C" void ADC0_IRQHandler()
 {
-    if (DL_DMA_getPendingInterrupt(DMA) ==
-        DL_DMA_EVENT_IIDX_DMACH0)
-    {
-        DL_DMA_clearInterruptStatus(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
-        );
+  if (DL_ADC12_getPendingInterrupt(ADC0) ==
+      DL_ADC12_IIDX_DMA_DONE)
+  {
+    DL_ADC12_clearInterruptStatus(
+      ADC0, DL_ADC12_INTERRUPT_DMA_DONE
+    );
 
-        BaseType_t higher_priority_task_woken = pdFALSE;
+    BaseType_t higher_priority_task_woken = pdFALSE;
 
-        if (adc_waiting_task != nullptr)
-        {
-            vTaskNotifyGiveFromISR(
-                adc_waiting_task,
-                &higher_priority_task_woken
-            );
-        }
+    vTaskNotifyGiveFromISR(
+      adc_waiting_task,
+      &higher_priority_task_woken
+    );
 
-        portYIELD_FROM_ISR(higher_priority_task_woken);
-    }
+    portYIELD_FROM_ISR(higher_priority_task_woken);
+  }
 }
 
 // ================================
 // Temperature Conversion Function
 // ================================
-
-
-// Convert an ADC reading into temperature in units of 0.1 degrees Celsius.
-static std::int16_t convert_to_temperature(std::uint16_t sample)
+static temperature_sample_t convert_temperature(
+  std::uint16_t raw_sample,
+  std::uint16_t calibration_code)
 {
-    // The ADC result was expanded from 12 bits to 16 bits.
-    // Recover the original 12-bit ADC code.
-    const std::uint16_t sample_code = sample >> 4;
+  const double sample_code = raw_sample >> 4;
 
-    // Factory calibration code measured at 30 degrees Celsius.
-    const std::uint16_t trim =
-        DL_SYSCTL_getTempCalibrationConstant();
+  const double temperature =
+    30.0 +
+    ((sample_code - calibration_code) * 3.3) /
+    (4096.0 * -0.0018);
 
-    // Convert the ADC difference into degrees Celsius.
-    constexpr float reference_voltage = 3.3f;
-    constexpr float adc_max_code = 4096.0f;
-    constexpr float sensor_slope = -0.0018f;
-
-    const float sample_voltage =
-        reference_voltage * sample_code / adc_max_code;
-
-    const float trim_voltage =
-        reference_voltage * trim / adc_max_code;
-
-    const float temperature_c =
-        30.0f + (sample_voltage - trim_voltage) / sensor_slope;
-
-    // Store temperature in tenths of a degree Celsius.
-    // Example: 25.3 C becomes 253.
-    const float scaled_temperature = temperature_c * 10.0f;
-
-    if (scaled_temperature > 32767.0f)
-        return 32767;
-
-    if (scaled_temperature < -32768.0f)
-        return -32768;
-
-    return static_cast<std::int16_t>(scaled_temperature + 0.5f);
+  // Store temperature in units of 0.1 degrees Celsius.
+  return static_cast<temperature_sample_t>(
+    std::lround(temperature * 10.0)
+  );
 }
 
 
