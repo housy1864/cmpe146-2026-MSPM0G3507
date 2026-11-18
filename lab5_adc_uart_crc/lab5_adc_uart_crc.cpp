@@ -149,8 +149,13 @@ private:
         );
     }
 
+    // Global diagonstic flag
+    static bool adc_read_success = false;
+
     void driver_read(std::span<std::uint16_t> buffer) override
     {
+        adc_read_success = false;
+
         if (buffer.empty())
         {
             return;
@@ -218,6 +223,9 @@ private:
             sample = upscale_12_to_16(sample);
         }
     }
+
+    adc_read_success = true;
+
 };
 
 
@@ -581,6 +589,13 @@ void adc_test_task(void*)
         std::printf("Starting ADC read...\n");
 
         adc.read(samples);
+
+        if (!adc_read_success)
+        {
+          std::printf("ADC read failed. Skipping samples.\n");
+          vTaskDelay(pdMS_TO_TICKS(2000));
+          continue;
+        }
 
         std::printf("ADC read completed!\n");
 
