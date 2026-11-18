@@ -499,22 +499,26 @@ int main()
   // configSUPPORT_STATIC_ALLOCATION are already supplied by the freertos_kernel
   // project's dpl/StaticAllocs_freertos.c - don't redefine them here.
   while (true) {
-  }*/
-
+  }
+}*/
   //TESTING MAIN
+static StaticTask_t adc_test_task_tcb;
+static StackType_t adc_test_task_stack[task_stack_words];
 
-  int main()
+void adc_test_task(void*);
+
+int main()
 {
-    // Start the ADC test task.
-    xTaskCreateStatic(
-        adc_test_task,
-        "adc_test_task",
-        task_stack_words,
-        nullptr,
-        tskIDLE_PRIORITY + 1,
-        adc_test_task_stack,
-        &adc_test_task_tcb
-    );
+  // Start the ADC test task.
+  xTaskCreateStatic(
+      adc_test_task,
+      "adc_test_task",
+      task_stack_words,
+      nullptr,
+      tskIDLE_PRIORITY + 1,
+      adc_test_task_stack,
+      &adc_test_task_tcb
+  );
 
     // Start FreeRTOS.
     vTaskStartScheduler();
