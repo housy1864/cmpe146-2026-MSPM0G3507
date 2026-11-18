@@ -559,7 +559,7 @@ int main()
 }*/
 
 // =========================== Role 1 Tester =====================================
- 1. Task storage
+// 1. Task storage
 static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
