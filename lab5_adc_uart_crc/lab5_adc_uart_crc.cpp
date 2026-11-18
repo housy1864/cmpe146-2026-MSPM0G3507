@@ -122,7 +122,7 @@ public:
 
         DL_DMA_setSrcAddr(
         DMA,
-        DMA_CH0_CHAN_ID,
+        adc_dma_channel,
         DL_ADC12_getMemResultAddress(
             ADC0,
             DL_ADC12_MEM_IDX_0
