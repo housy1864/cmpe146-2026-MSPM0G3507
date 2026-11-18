@@ -507,6 +507,33 @@ static StackType_t adc_test_task_stack[task_stack_words];
 
 void adc_test_task(void*);
 
+void adc_test_task(void*)
+{
+    std::printf("ADC test task started!\n");
+
+    adc_driver adc;
+
+    std::array<std::uint16_t, samples_per_batch> samples{};
+
+    while (true)
+    {
+        std::printf("Starting ADC read...\n");
+
+        adc.read(samples.data(), samples.size());
+
+        std::printf("ADC read completed!\n");
+
+        for (std::size_t i = 0; i < samples.size(); i++)
+        {
+            std::printf("Sample %u: %u\n",
+                static_cast<unsigned>(i),
+                static_cast<unsigned>(samples[i]));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
 int main()
 {
   // Start the ADC test task.
