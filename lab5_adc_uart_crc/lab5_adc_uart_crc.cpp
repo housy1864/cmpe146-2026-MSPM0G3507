@@ -564,14 +564,17 @@ static StaticTask_t adc_test_task_tcb;
 static StackType_t adc_test_task_stack[task_stack_words];
 
 // 2. ADC test function
-
 void adc_test_task(void*)
 {
-    std::printf("ADC DMA test started!\n");
+    std::printf("ADC Temperature test started!\n");
 
     adc_driver adc;
 
     std::array<std::uint16_t, 64> samples{};
+
+    // Read the factory temperature calibration value.
+    const std::uint16_t calibration_code =
+        DL_SYSCTL_getTempCalibrationConstant();
 
     while (true)
     {
@@ -583,10 +586,15 @@ void adc_test_task(void*)
 
         for (std::size_t i = 0; i < samples.size(); i++)
         {
+            // Convert the ADC sample into temperature.
+            const std::int16_t temperature =
+                convert_to_temperature(samples[i], calibration_code);
+
             std::printf(
-                "Sample %u: %u\n",
+                "Sample %u: ADC = %u, Temperature = %.1f C\n",
                 static_cast<unsigned>(i),
-                static_cast<unsigned>(samples[i])
+                static_cast<unsigned>(samples[i]),
+                static_cast<double>(temperature) / 10.0
             );
         }
 
