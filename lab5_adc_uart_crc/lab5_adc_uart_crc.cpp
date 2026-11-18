@@ -183,7 +183,29 @@ class adc_driver : public lab5::adc16_stream
 // DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 extern "C" void ADC0_IRQHandler()
-{}
+{
+  // Check whether the DMA transfer completed.
+  if (DL_ADC12_getPendingInterrupt(ADC0)
+      == DL_ADC12_IIDX_DMA_DONE)
+    {
+      // Clear the interrupt flag.
+      DL_ADC12_clearInterruptStatus(
+          ADC0,
+          DL_ADC12_INTERRUPT_DMA_DONE
+      );
+
+      BaseType_t higher_priority_task_woken = pdFALSE;
+
+      // Wake the task that called adc.read().
+      vTaskNotifyGiveFromISR(
+          adc_waiting_task,
+          &higher_priority_task_woken
+      );
+
+      // Allow FreeRTOS to schedule the newly awakened task.
+      portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
+}
 
 // =============================================================================
 // Role 2: UART
