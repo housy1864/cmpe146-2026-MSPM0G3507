@@ -153,7 +153,7 @@ private:
     // Convert 12-bit values to the 16-bit interface format.
     for (size_t i = 0; i < length; i++)
     {
-      std::uint16_t value = sample & 0x0FFF;
+      std::uint16_t value = std::sample & 0x0FFF;
       sample = static_cast<std::uint16_t>(
         (value << 4) | (value >> 8)
       );
