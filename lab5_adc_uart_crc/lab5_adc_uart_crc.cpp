@@ -191,6 +191,9 @@ private:
             pdTRUE,
             pdMS_TO_TICKS(1000)
         );
+        std::printf("Raw DMA sample 0: %u\n", buffer[0]);
+        std::printf("Raw DMA sample 1: %u\n", buffer[1]);
+        std::printf("Raw DMA sample 2: %u\n", buffer[2]);
 
         if (notification == 0)
         {
