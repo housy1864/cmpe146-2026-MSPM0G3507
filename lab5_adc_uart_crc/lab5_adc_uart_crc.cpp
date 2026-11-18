@@ -121,15 +121,15 @@ public:
         );
 
         // 8. Enable DMA channel completion interrupt.
-        DL_DMA_clearInterruptStatus(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
         );
 
-        DL_DMA_enableInterrupt(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
-        );
+        DL_ADC12_enableInterrupt(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
+);
 
         NVIC_SetPriority(DMA_INT_IRQn, 3);
         NVIC_EnableIRQ(DMA_INT_IRQn);
@@ -224,14 +224,14 @@ private:
 // DL_ADC12_getPendingInterrupt(ADC0) returns DL_ADC12_IIDX_DMA_DONE, wake that
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
-extern "C" void DMA_IRQHandler(void)
+extern "C" void ADC0_IRQHandler(void)
 {
-    if (DL_DMA_getPendingInterrupt(DMA) ==
-        DL_DMA_EVENT_IIDX_DMACH0)
+    if (DL_ADC12_getPendingInterrupt(ADC0) ==
+        DL_ADC12_IIDX_DMA_DONE)
     {
-        DL_DMA_clearInterruptStatus(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
+        DL_ADC12_clearInterruptStatus(
+            ADC0,
+            DL_ADC12_INTERRUPT_DMA_DONE
         );
 
         BaseType_t higher_priority_task_woken = pdFALSE;
