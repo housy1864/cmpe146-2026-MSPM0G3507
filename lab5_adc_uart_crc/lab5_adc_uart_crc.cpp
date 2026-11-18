@@ -146,69 +146,53 @@ private:
         );
     }
 
-    void driver_read(std::span<uint16_t> buffer) override
-    {
-        if (buffer.empty()) {
-            return;
-        }
-
-        // Disable DMA before configuring a new transfer.
-        DL_DMA_disableChannel(DMA, adc_dma_channel);
-
-        // Point DMA at the caller's buffer.
-        DL_DMA_setDestAddr(
-            DMA,
-            adc_dma_channel,
-            static_cast<uint32_t>(
-                reinterpret_cast<uintptr_t>(buffer.data())
-            )
-        );
-
-        // Transfer the entire buffer in one DMA operation.
-        DL_DMA_setTransferSize(
-            DMA,
-            adc_dma_channel,
-            static_cast<uint16_t>(buffer.size())
-        );
-
-        // Clear any stale task notification and ADC interrupt.
-        ulTaskNotifyTake(pdTRUE, 0);
-
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        DL_DMA_clearInterruptStatus(
-            DMA,
-            DL_DMA_INTERRUPT_CHANNEL0
-        );
-
-        // Save the current task before starting the conversion.
-        adc_waiting_task = xTaskGetCurrentTaskHandle();
-
-        // Re-arm DMA and ADC.
-        DL_DMA_enableChannel(DMA, adc_dma_channel);
-        DL_ADC12_enableDMA(ADC0);
-
-        // Begin conversion.
-        DL_ADC12_startConversion(ADC0);
-
-        // Sleep until the DMA interrupt wakes this task.
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        // Stop conversion after the DMA transfer completes.
-        DL_ADC12_stopConversion(ADC0);
-        DL_ADC12_disableDMA(ADC0);
-        DL_DMA_disableChannel(DMA, adc_dma_channel);
-
-        adc_waiting_task = nullptr;
-
-        // Upscale every 12-bit sample to the required 16-bit representation.
-        for (auto& sample : buffer) {
-            sample = upscale_12_to_16(sample);
-        }
+void driver_read(uint16_t* buffer, size_t length) override
+{
+    if (length == 0) {
+        return;
     }
+
+    DL_DMA_disableChannel(DMA, adc_dma_channel);
+
+    DL_DMA_setDestAddr(
+        DMA,
+        adc_dma_channel,
+        static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(buffer)
+        )
+    );
+
+    DL_DMA_setTransferSize(
+        DMA,
+        adc_dma_channel,
+        static_cast<uint16_t>(length)
+    );
+
+    ulTaskNotifyTake(pdTRUE, 0);
+
+    DL_ADC12_clearInterruptStatus(
+        ADC0,
+        DL_ADC12_INTERRUPT_DMA_DONE
+    );
+
+    adc_waiting_task = xTaskGetCurrentTaskHandle();
+
+    DL_DMA_enableChannel(DMA, adc_dma_channel);
+    DL_ADC12_enableDMA(ADC0);
+    DL_ADC12_startConversion(ADC0);
+
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    DL_ADC12_stopConversion(ADC0);
+    DL_ADC12_disableDMA(ADC0);
+    DL_DMA_disableChannel(DMA, adc_dma_channel);
+
+    adc_waiting_task = nullptr;
+
+    for (size_t i = 0; i < length; i++) {
+        buffer[i] = (buffer[i] << 4) | (buffer[i] >> 8);
+    }
+}
 };
 
 
