@@ -31,8 +31,152 @@
 //     task's handle, start the conversion, then sleep with ulTaskNotifyTake()
 //     until ADC0_IRQHandler() wakes you. Upscale each 12-bit sample to 16 bits
 //     before returning.
-class adc_driver
-{};
+static TaskHandle_t adc_waiting_task = nullptr;
+
+class adc_driver : public lab5::adc16_stream
+{
+  public:
+    adc_driver()
+    {
+        // 1. Reset ADC0 and turn on its power.
+        DL_ADC12_reset(ADC0);
+        DL_ADC12_enablePower(ADC0);
+
+        // Wait for ADC power to become stable.
+        delay_cycles(POWER_STARTUP_DELAY);
+
+        // 2. Configure ADC clock.
+        static const DL_ADC12_ClockConfig clock_config = {
+            .clockSel = DL_ADC12_CLOCK_SYSOSC,
+            .divideRatio = DL_ADC12_CLOCK_DIVIDE_1,
+            .freqRange = DL_ADC12_CLOCK_FREQ_RANGE_24_TO_32,
+        };
+    DL_ADC12_setClockConfig(ADC0, &clock_config);
+
+    // 3. Configure ADC: repeat mode, software trigger,
+    // 12-bit resolution, unsigned results.
+    DL_ADC12_initSingleSample(
+        ADC0,
+        DL_ADC12_REPEAT_MODE_ENABLED,
+        DL_ADC12_SAMPLING_SOURCE_AUTO,
+        DL_ADC12_TRIG_SRC_SOFTWARE,
+        DL_ADC12_SAMP_CONV_RES_12_BIT,
+        DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED
+    );
+
+    // 4. Configure MEM0 to read internal temperature sensor.
+    DL_ADC12_configConversionMem(
+        ADC0,
+        DL_ADC12_MEM_IDX_0,
+        DL_ADC12_INPUT_CHAN_11,
+        DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+        DL_ADC12_AVERAGING_MODE_DISABLED,
+        DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+        DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+        DL_ADC12_WINDOWS_COMP_MODE_DISABLED
+    );
+
+    // 5. Set sample time.
+    // At 32 MHz, 400 cycles = 12.5 microseconds.
+    DL_ADC12_setSampleTime0(ADC0, 400);
+
+    // 6. Configure ADC DMA trigger and completion interrupt.
+    DL_ADC12_setDMASamplesCnt(ADC0, 1);
+
+    DL_ADC12_enableDMATrigger(
+        ADC0,
+        DL_ADC12_DMA_MEM0_RESULT_LOADED
+    );
+
+    DL_ADC12_clearInterruptStatus(
+        ADC0,
+        DL_ADC12_INTERRUPT_DMA_DONE
+    );
+
+    DL_ADC12_enableInterrupt(
+        ADC0,
+        DL_ADC12_INTERRUPT_DMA_DONE
+    );
+
+    // Enable ADC interrupt in the NVIC.
+    NVIC_EnableIRQ(ADC0_INT_IRQn);
+
+    // 7. Configure DMA channel.
+    static const DL_DMA_Config dma_config = {
+        .transferMode = DL_DMA_FULL_CH_REPEAT_SINGLE_TRANSFER_MODE,
+        .extendedMode = DL_DMA_NORMAL_MODE,
+        .destIncrement = DL_DMA_ADDR_INCREMENT,
+        .srcIncrement = DL_DMA_ADDR_UNCHANGED,
+        .destWidth = DL_DMA_WIDTH_HALF_WORD,
+        .srcWidth = DL_DMA_WIDTH_HALF_WORD,
+        .trigger = DMA_ADC0_EVT_GEN_BD_TRIG,
+        .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+    };
+
+    DL_DMA_initChannel(
+        DMA,
+        DMA_CH0_CHAN_ID,
+        &dma_config
+    );
+
+    // The ADC is now configured.
+    DL_ADC12_enableConversions(ADC0);
+  }
+
+  private:
+    // Convert a 12-bit ADC result into the 16-bit format
+    // required by hal/adc.hpp.
+    static std::uint16_t upscale_12_to_16(std::uint16_t value)
+    {
+        return (value << 4) | (value >> 8);
+    }
+
+    void driver_read(std::span<std::uint16_t> buffer) override
+    {
+        // 1. Disable DMA before changing its destination.
+        DL_DMA_disableChannel(DMA, DMA_CH0_CHAN_ID);
+
+        // 2. Tell DMA where the destination buffer is.
+        DL_DMA_setDestAddr(
+            DMA,
+            DMA_CH0_CHAN_ID,
+            reinterpret_cast<std::uint32_t>(buffer.data())
+        );
+
+        // 3. Tell DMA how many samples to transfer.
+        DL_DMA_setTransferSize(
+            DMA,
+            DMA_CH0_CHAN_ID,
+            buffer.size()
+        );
+
+        // 4. Re-enable DMA.
+        DL_DMA_enableChannel(DMA, DMA_CH0_CHAN_ID);
+
+        // 5. Re-enable ADC DMA requests.
+        DL_ADC12_enableDMA(ADC0);
+
+        // 6. Remember which FreeRTOS task is waiting.
+        adc_waiting_task = xTaskGetCurrentTaskHandle();
+
+        // 7. Start taking measurements.
+        DL_ADC12_startConversion(ADC0);
+
+        // 8. Sleep until ADC0_IRQHandler wakes this task.
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // 9. DMA is finished. Stop ADC conversions.
+        DL_ADC12_stopConversion(ADC0);
+
+        // 10. Convert every 12-bit result into 16-bit format.
+        for (auto& sample : buffer)
+        {
+            sample = upscale_12_to_16(sample);
+        }
+    }
+
+};
 
 // TODO(lab, role 1): Store the handle of the task waiting in
 // adc_driver::driver_read() somewhere this handler can reach. When
