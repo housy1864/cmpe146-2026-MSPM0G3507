@@ -585,7 +585,7 @@ void adc_test_task(void*)
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-}
+}*/
 
 int main()
 {
@@ -607,7 +607,7 @@ int main()
     {
     }
     
-  }*/
+  }
 
 void adc_test_task(void*)
 {
