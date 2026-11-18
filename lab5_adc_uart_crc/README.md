@@ -293,3 +293,41 @@ needs no wiring.
   `adc12_internal_temp_sensor_mathacl`.
 
 <!-- cspell:ignore mathacl SYSOSC VDDA IIDX semphr -->
+
+## UART driver test case
+
+The source contains a disabled local-loopback test controlled by
+`run_uart_loopback_test` in `lab5_adc_uart_crc.cpp`.
+
+### Local loopback
+
+1. Confirm J14 selects PA9 (position 2–3).
+2. Connect PA8/TX to PA9/RX on the same board.
+3. Set `run_uart_loopback_test` to `true` and rebuild/flash.
+4. The test sends `55 AA 00 FF 12 A5 7E 81`.
+5. The RX interrupt must place all eight bytes in the circular buffer.
+
+Expected output:
+
+```text
+UART loopback: PASS
+```
+
+`TIMEOUT` indicates that no complete response reached the receive buffer;
+`FAIL` indicates a byte mismatch.
+
+### Two-board link
+
+Flash the same UART configuration to both boards, disable the local-loopback
+test, and connect:
+
+```text
+Board A PA8/TX  -> Board B PA9/RX
+Board A PA9/RX  -> Board B PA8/TX
+Board A GND     -> Board B GND
+```
+
+Use an echo test on Board B: every byte received from its circular buffer is
+written back through UART1. Board A sends the same eight-byte pattern and
+passes when it receives the identical sequence. Confirm J14 is in position
+2–3 on both boards.

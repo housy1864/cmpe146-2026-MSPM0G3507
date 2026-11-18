@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -57,6 +58,96 @@ extern "C" void ADC0_IRQHandler()
 class uart_serial_driver : public lab6::serial
 { // Overview Page: 1,242
 private:
+  static constexpr std::size_t receive_buffer_size = 256;
+  static inline std::array<std::uint8_t, receive_buffer_size> receive_storage{};
+  static inline volatile std::size_t receive_write_cursor = 0;
+
+  // UART1 uses PA8 for TX and PA9 for RX on the LaunchPad diagram.
+  // PINCM19 and PINCM20 are entries 18 and 19 in the PINCM array.
+  // Datasheet: Pages 11 for PINCMx, 23 for pin numbers,
+  // IOMUX address on Datasheet Page 59.
+  static constexpr std::uintptr_t IOMUX_PA8 = 0x4042'804CU;
+  static constexpr std::uintptr_t IOMUX_PA9 = 0x4042'8050U;
+
+  // IOMUX PINCM fields. PA8/PA9 use peripheral function 2 for UART1.
+  static constexpr std::uint32_t PINCM_PF_UART1 = 2U;
+  static constexpr std::uint32_t PINCM_PC_CONNECTED = (1U << 7);
+  static constexpr std::uint32_t PINCM_PIPU_ENABLE = (1U << 17);
+  static constexpr std::uint32_t PINCM_INENA_ENABLE = (1U << 18);
+
+  static volatile std::uint32_t* reg(std::uintptr_t address)
+  {
+    return reinterpret_cast<volatile std::uint32_t*>(address);
+  }
+
+public:
+  explicit uart_serial_driver(settings const& p_settings)
+    : m_configured(driver_configure(p_settings))
+  {
+  }
+
+  [[nodiscard]] bool is_configured() const
+  {
+    return m_configured;
+  }
+
+  static void handle_interrupt()
+  {
+    // Read UART1's interrupt index to identify the highest-priority pending event.
+    switch (UART1->CPU_INT.IIDX) {
+      // A receive interrupt means at least one byte is available in the RX FIFO.
+      case UART_CPU_INT_IIDX_STAT_RXIFG:
+      // A receive-timeout interrupt also means received data may remain in the FIFO.
+      case UART_CPU_INT_IIDX_STAT_RTFG:
+        // Continue until every byte currently waiting in the RX FIFO is processed.
+        while ((UART1->STAT & UART_STAT_RXFE_MASK) ==
+               UART_STAT_RXFE_CLEARED) {
+          // Read the received byte and any error flags attached to that byte.
+          std::uint32_t const received = UART1->RXDATA;
+          // Combine all UART receive-error bits into one mask for validation.
+          constexpr std::uint32_t error_mask =
+            UART_RXDATA_FRMERR_MASK | UART_RXDATA_PARERR_MASK |
+            UART_RXDATA_BRKERR_MASK | UART_RXDATA_OVRERR_MASK;
+          // Store only bytes that were received without a UART-level error.
+          if ((received & error_mask) == 0U) {
+            // Keep only the 8-bit data field and write it at the current cursor.
+            receive_storage[receive_write_cursor] =
+              static_cast<std::uint8_t>(received & UART_RXDATA_DATA_MASK);
+            // Advance the cursor and wrap it to zero at the buffer boundary.
+            receive_write_cursor =
+              (receive_write_cursor + 1U) % receive_buffer_size;
+          }
+        }
+        // RXDATA reads acknowledge the received bytes and leave the handler.
+        break;
+
+      // These interrupt causes indicate a UART receive error.
+      case UART_CPU_INT_IIDX_STAT_FEFG:
+      case UART_CPU_INT_IIDX_STAT_PEFG:
+      case UART_CPU_INT_IIDX_STAT_BEFG:
+      case UART_CPU_INT_IIDX_STAT_OEFG:
+        // If an errored byte is present, read it to remove it from the FIFO.
+        if ((UART1->STAT & UART_STAT_RXFE_MASK) ==
+            UART_STAT_RXFE_CLEARED) {
+          (void)UART1->RXDATA;
+        }
+        // Explicitly clear all receive-error interrupt flags.
+        UART1->CPU_INT.ICLR = UART_CPU_INT_ICLR_FRMERR_CLR |
+                              UART_CPU_INT_ICLR_PARERR_CLR |
+                              UART_CPU_INT_ICLR_BRKERR_CLR |
+                              UART_CPU_INT_ICLR_OVRERR_CLR;
+        // Do not place an errored byte into the receive buffer.
+        break;
+
+      // Ignore interrupt causes that are not part of this driver yet.
+      default:
+        break;
+    }
+  }
+
+private:
+  bool m_configured;
+
   bool driver_configure(settings const& p_settings) override
   {
     // UART1 uses the 32 MHz BUSCLK on the MSPM0G3507.  Keep this value here
@@ -79,14 +170,16 @@ private:
       the baud rate desired for the UART connection.
 
     */
-
+    // Oversampling: Pg. 1,247. Baud rate generation: Pg. 1,248
     std::uint32_t const divisor_x64 =
       (uart_clock_hz * 64U + (oversampling * p_settings.baud_rate) / 2U) /
       (oversampling * p_settings.baud_rate);
     std::uint32_t const integer_divisor = divisor_x64 / 64U;
     std::uint32_t const fractional_divisor = divisor_x64 % 64U;
 
-    if (integer_divisor == 0U || integer_divisor > 0xFFFFU) {
+    // If Divisor Value out of range or 0, return false as a fail-safe.
+    if (integer_divisor == 0U ||
+        integer_divisor > std::numeric_limits<std::uint16_t>::max()) {
       return false;
     }
 
@@ -113,30 +206,29 @@ private:
     // The LaunchPad diagram routes this UART through PA8 (TX) and PA9 (RX).
     // J14 must be installed in position 2-3 so the header RX signal selects
     // PA9 rather than PB23.
-    IOMUX->SECCFG.PINCM[IOMUX_PINCM19] =
-      IOMUX_PINCM19_PF_UART1_TX | IOMUX_PINCM_PC_CONNECTED;
-    IOMUX->SECCFG.PINCM[IOMUX_PINCM20] =
-      IOMUX_PINCM20_PF_UART1_RX | IOMUX_PINCM_PC_CONNECTED |
-      IOMUX_PINCM_INENA_ENABLE | IOMUX_PINCM_PIPU_ENABLE;
+    *reg(IOMUX_PA8) = PINCM_PF_UART1 | PINCM_PC_CONNECTED;
+    *reg(IOMUX_PA9) = PINCM_PF_UART1 | PINCM_PC_CONNECTED |
+                      PINCM_INENA_ENABLE | PINCM_PIPU_ENABLE;
 
     // Register-level UART1 configuration.
-    UART1->GPRCM.PWREN =
-      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE; // Pg. 1267
     UART1->GPRCM.RSTCTL =
       UART_RSTCTL_KEY_UNLOCK_W | UART_RSTCTL_RESETSTKYCLR_CLR |
       UART_RSTCTL_RESETASSERT_ASSERT; // Pg. 1268
+    UART1->GPRCM.PWREN =
+      UART_PWREN_KEY_UNLOCK_W | UART_PWREN_ENABLE_ENABLE; // Pg. 1267
 
     UART1->CLKSEL = UART_CLKSEL_BUSCLK_SEL_ENABLE; // Pg. 1272
-    UART1->CLKDIV = UART_CLKDIV_RATIO_DIV_BY_1;
+    UART1->CLKDIV = UART_CLKDIV_RATIO_DIV_BY_1; // Clock divider not used, dividing only done for Baud rate
 
     UART1->CTL0 = UART_CTL0_MODE_UART | UART_CTL0_HSE_OVS16 |
-                  UART_CTL0_TXE_ENABLE | UART_CTL0_RXE_ENABLE;
+                  UART_CTL0_TXE_ENABLE | UART_CTL0_RXE_ENABLE |
+                  UART_CTL0_FEN_ENABLE; // Pgs 1299-1301
     UART1->LCRH = UART_LCRH_WLEN_DATABIT8 | parity |
                   (p_settings.stop == settings::stop_bits::two
                      ? UART_LCRH_STP2_ENABLE
-                     : UART_LCRH_STP2_DISABLE);
-    UART1->IBRD = integer_divisor;
-    UART1->FBRD = fractional_divisor;
+                     : UART_LCRH_STP2_DISABLE); // Pgs. 1302-1303
+    UART1->IBRD = integer_divisor; // Pg. 1308
+    UART1->FBRD = fractional_divisor; // Pg. 1309
 
     // The UART requires an LCRH write after changing IBRD/FBRD.  Rewriting
     // the complete line-control value also makes the ordering explicit.
@@ -145,9 +237,47 @@ private:
                      ? UART_LCRH_STP2_ENABLE
                      : UART_LCRH_STP2_DISABLE);
     UART1->CTL0 |= UART_CTL0_ENABLE_ENABLE;
+
+    UART1->IFLS = (UART1->IFLS & ~UART_IFLS_RXIFLSEL_MASK) |
+                  UART_IFLS_RXIFLSEL_LVL_1;
+    UART1->CPU_INT.IMASK = UART_CPU_INT_IMASK_RXINT_SET |
+                           UART_CPU_INT_IMASK_FRMERR_SET |
+                           UART_CPU_INT_IMASK_PARERR_SET |
+                           UART_CPU_INT_IMASK_BRKERR_SET |
+                           UART_CPU_INT_IMASK_OVRERR_SET;
+    NVIC_EnableIRQ(UART1_INT_IRQn);
     return true;
   }
+
+  void driver_write(std::span<std::uint8_t const> p_data) override
+  {
+    for (std::uint8_t const byte : p_data) {
+      while ((UART1->STAT & UART_STAT_TXFF_MASK) !=
+             UART_STAT_TXFF_CLEARED) {
+      }
+      UART1->TXDATA = byte; // Simply lists the byte UART tx will send
+    }
+  }
+
+  std::span<std::uint8_t const> driver_receive_buffer() override
+  {
+    return std::span<std::uint8_t const>(
+      receive_storage.data(), receive_storage.size());
+  }
+
+  std::size_t driver_receive_cursor() override
+  {
+    return receive_write_cursor;
+  }
 };
+
+extern "C" void UART1_IRQHandler()
+{
+  uart_serial_driver::handle_interrupt();
+}
+
+static lab6::serial::settings const uart_settings{};  // 115200 baud, 8N1
+static uart_serial_driver uart_driver(uart_settings);
 
 // =============================================================================
 // Role 3: CRC
@@ -335,6 +465,42 @@ int main()
 {
   std::printf("Hello, World\n");
 
+  if (!uart_driver.is_configured()) {
+    std::printf("UART configuration failed\n");
+  } else {
+    std::printf("UART configured successfully\n");
+
+    static constexpr std::uint8_t uart_tx_test[] =
+      "UART TX test: direct driver transmission works\r\n";
+    uart_driver.write(std::span<std::uint8_t const>(
+      uart_tx_test, sizeof(uart_tx_test) - 1U));
+
+    constexpr std::size_t expected_bytes = sizeof(uart_tx_test) - 1U;
+    volatile std::uint32_t timeout = 1'000'000U;
+    while (uart_driver.receive_cursor() < expected_bytes && timeout-- != 0U) {
+    }
+
+    std::printf(
+      "UART STAT=0x%08lX IIDX=0x%08lX cursor=%lu\n",
+      static_cast<unsigned long>(UART1->STAT),
+      static_cast<unsigned long>(UART1->CPU_INT.IIDX),
+      static_cast<unsigned long>(uart_driver.receive_cursor()));
+    std::printf(
+      "UART CTL0=0x%08lX CLKSEL=0x%08lX PWREN=0x%08lX\n",
+      static_cast<unsigned long>(UART1->CTL0),
+      static_cast<unsigned long>(UART1->CLKSEL),
+      static_cast<unsigned long>(UART1->GPRCM.PWREN));
+
+    std::span<std::uint8_t const> const received =
+      uart_driver.receive_buffer();
+    std::printf("Received data: ");
+    for (std::size_t i = 0; i < uart_driver.receive_cursor(); ++i) {
+      std::printf("%c", received[i]);
+    }
+    std::printf("\n");
+  }
+
+  std::printf("UART done \n");
   if constexpr (this_device == device_role::sensor) {
     // TODO(lab, role 4): Before the scheduler starts:
     //   1. Create sample_request and batch_queue.

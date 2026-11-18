@@ -45,6 +45,12 @@
                 "name": "lab1_gpio",
                 "resourceId": "/lab1_gpio"
             }
+        },
+        {
+            "name": "MSPM0G3507.ccxml",
+            "type": "ccs-debug",
+            "request": "launch",
+            "targetConfig": "${workspaceFolder}/lab5_adc_uart_crc/targetConfigs/MSPM0G3507.ccxml"
         }
     ]
 }
