@@ -98,23 +98,19 @@ public:
             DL_ADC12_DMA_MEM0_RESULT_LOADED
         );
 
-        // Enable the ADC DMA-complete interrupt.
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        // Enable DMA channel 0 completion interrupt.
+        DL_DMA_clearInterruptStatus(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        DL_ADC12_enableInterrupt(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        DL_DMA_enableInterrupt(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
-        DL_ADC12_enableInterrupt(
-          ADC0,
-          DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-        );
-
-        NVIC_EnableIRQ(ADC0_INT_IRQn);
+        // Enable the DMA interrupt in the NVIC.
+        NVIC_EnableIRQ(DMA_INT_IRQn);
 
         // 7. Configure DMA channel 0.
         static const DL_DMA_Config dma_config = {
@@ -157,61 +153,75 @@ private:
         );
     }
 
-    void driver_read(std::span<std::uint16_t> buffer) override
-  {
-      adc_read_success = false;
+void driver_read(std::span<std::uint16_t> buffer) override
+{
+    adc_read_success = false;
 
-      if (buffer.empty())
-          return;
+    if (buffer.empty())
+        return;
 
-      DL_DMA_disableChannel(DMA, adc_dma_channel);
+    // Disable DMA before reconfiguring the transfer.
+    DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-      DL_DMA_setDestAddr(
-          DMA,
-          adc_dma_channel,
-          static_cast<uint32_t>(
-              reinterpret_cast<uintptr_t>(buffer.data())
-          )
-      );
+    // Set destination buffer.
+    DL_DMA_setDestAddr(
+        DMA,
+        adc_dma_channel,
+        static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(buffer.data())
+        )
+    );
 
-      DL_DMA_setTransferSize(
-          DMA,
-          adc_dma_channel,
-          static_cast<uint16_t>(buffer.size())
-      );
+    // Transfer the requested number of 16-bit samples.
+    DL_DMA_setTransferSize(
+        DMA,
+        adc_dma_channel,
+        static_cast<uint16_t>(buffer.size())
+    );
 
-      // Clear any previous task notification.
-      ulTaskNotifyTake(pdTRUE, 0);
+    // Clear stale notifications and DMA interrupt status.
+    ulTaskNotifyTake(pdTRUE, 0);
 
-      adc_waiting_task = xTaskGetCurrentTaskHandle();
+    DL_DMA_clearInterruptStatus(
+        DMA,
+        DL_DMA_INTERRUPT_CHANNEL0
+    );
 
-      DL_DMA_enableChannel(DMA, adc_dma_channel);
-      DL_ADC12_enableDMA(ADC0);
-      DL_ADC12_startConversion(ADC0);
+    // Save the task that must be awakened.
+    adc_waiting_task = xTaskGetCurrentTaskHandle();
 
-      // Wait up to one second for completion.
-      uint32_t notification =
-          ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+    // Start DMA and ADC.
+    DL_DMA_enableChannel(DMA, adc_dma_channel);
+    DL_ADC12_enableDMA(ADC0);
+    DL_ADC12_startConversion(ADC0);
 
-      DL_ADC12_stopConversion(ADC0);
-      DL_ADC12_disableDMA(ADC0);
-      DL_DMA_disableChannel(DMA, adc_dma_channel);
+    // Wait for DMA channel completion.
+    uint32_t notification = ulTaskNotifyTake(
+        pdTRUE,
+        pdMS_TO_TICKS(1000)
+    );
 
-      adc_waiting_task = nullptr;
+    // Stop the peripherals.
+    DL_ADC12_stopConversion(ADC0);
+    DL_ADC12_disableDMA(ADC0);
+    DL_DMA_disableChannel(DMA, adc_dma_channel);
 
-      if (notification == 0)
-      {
-          std::printf("ERROR: ADC DMA timeout!\n");
-          return;
-      }
+    adc_waiting_task = nullptr;
 
-      adc_read_success = true;
+    if (notification == 0)
+    {
+        std::printf("ERROR: DMA channel 0 timeout!\n");
+        return;
+    }
 
-      for (auto& sample : buffer)
-      {
-          sample = upscale_12_to_16(sample);
-      }
-  }
+    // Convert all 12-bit samples to 16-bit samples.
+    for (auto& sample : buffer)
+    {
+        sample = upscale_12_to_16(sample);
+    }
+
+    adc_read_success = true;
+}
 
 };
 
@@ -222,49 +232,14 @@ private:
 // task with vTaskNotifyGiveFromISR() and finish with portYIELD_FROM_ISR().
 
 // ADC interrupt handler.
-/*extern "C" void ADC0_IRQHandler()
+extern "C" void DMA_IRQHandler()
 {
-    if (DL_ADC12_getPendingInterrupt(ADC0) ==
-        DL_ADC12_IIDX_DMA_DONE)
+    if (DL_DMA_getPendingInterrupt(DMA) ==
+        DL_DMA_EVENT_IIDX_DMACH0)
     {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
-        );
-
-        BaseType_t higher_priority_task_woken = pdFALSE;
-
-        if (adc_waiting_task != nullptr)
-        {
-            vTaskNotifyGiveFromISR(
-                adc_waiting_task,
-                &higher_priority_task_woken
-            );
-        }
-
-        portYIELD_FROM_ISR(higher_priority_task_woken);
-    }
-}*/
-
-extern "C" void ADC0_IRQHandler()
-{
-    // Diagnostic: clear the ADC result-loaded interrupt.
-    if (DL_ADC12_getRawInterruptStatus(
-            ADC0, DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED))
-    {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED
-        );
-    }
-
-    // Check DMA_DONE independently of the MEM0 interrupt.
-    if (DL_ADC12_getRawInterruptStatus(
-            ADC0, DL_ADC12_INTERRUPT_DMA_DONE))
-    {
-        DL_ADC12_clearInterruptStatus(
-            ADC0,
-            DL_ADC12_INTERRUPT_DMA_DONE
+        DL_DMA_clearInterruptStatus(
+            DMA,
+            DL_DMA_INTERRUPT_CHANNEL0
         );
 
         BaseType_t higher_priority_task_woken = pdFALSE;
