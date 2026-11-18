@@ -120,15 +120,6 @@ public:
             .destIncrement = DL_DMA_ADDR_INCREMENT,
         };
 
-        DL_DMA_setSrcAddr(
-        DMA,
-        adc_dma_channel,
-        DL_ADC12_getMemResultAddress(
-            ADC0,
-            DL_ADC12_MEM_IDX_0
-            )
-        );
-
         DL_DMA_initChannel(
             DMA,
             adc_dma_channel,
@@ -557,16 +548,22 @@ int main()
 //======================================================================
 void adc_test_task(void*)
 {
+    std::printf("ADC test task started!\n");
+
+    std::printf("Creating ADC driver...\n");
     adc_driver adc;
+    std::printf("ADC driver initialized!\n");
 
     std::array<std::uint16_t, 64> samples{};
 
     while (true)
     {
-        // Collect 64 ADC readings.
+        std::printf("Starting ADC read...\n");
+
         adc.read(samples);
 
-        // Print the readings.
+        std::printf("ADC read completed!\n");
+
         for (std::size_t i = 0; i < samples.size(); i++)
         {
             std::printf("Sample %u: %u\n",
@@ -576,7 +573,6 @@ void adc_test_task(void*)
 
         std::printf("ADC batch complete!\n");
 
-        // Wait before taking another batch.
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
