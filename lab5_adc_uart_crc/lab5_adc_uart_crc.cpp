@@ -61,7 +61,7 @@ private:
   static constexpr std::size_t receive_buffer_size = 256;
   static inline std::array<std::uint8_t, receive_buffer_size> receive_storage{}; // Used to store data at cursor location.
   static inline volatile std::size_t receive_write_cursor = 0; 
-  // The cursor is used to find the next valid received byte.
+  // The cursor is used to find the next valid received byte based on the buffer.
 
   // UART1 uses PA8 for TX and PA9 for RX on the LaunchPad diagram.
   // PINCM19 and PINCM20 are entries 18 and 19 in the PINCM array.
@@ -235,11 +235,12 @@ public:
           // Flag Registers: TRM Pg. 1249
           if ((received & error_mask) == 0U) {
             receive_storage[receive_write_cursor] =
-              static_cast<std::uint8_t>(received & RXDATA_MASK); // Cursor receives an arriving byte.
+              static_cast<std::uint8_t>(received & RXDATA_MASK); // Stores a received byte
+              // at the cursor location to the buffer.
             // Advance the cursor and wrap it to zero at the buffer boundary.
             receive_write_cursor =
               (receive_write_cursor + 1U) % receive_buffer_size; 
-              // Cursor updated according to current position and buffer size
+              // Cursor incremented according to current position based on the buffer size
           }
         }
         // RXDATA reads acknowledge the received bytes and leave the handler.
@@ -249,7 +250,7 @@ public:
       case IIDX_FEFG:
       case IIDX_PEFG:
       case IIDX_BEFG:
-      case IIDX_OEFG:
+      case IIDX_OEFG: // During an overrun error
         // If an errored byte is present, read it to remove it from the FIFO.
         if ((*uart_reg(UART1_STAT) & STAT_RXFE) == 0U) {
           (void)*uart_reg(UART1_RXDATA);
