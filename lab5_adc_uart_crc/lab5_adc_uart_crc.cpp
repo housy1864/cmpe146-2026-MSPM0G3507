@@ -71,7 +71,7 @@ private:
   static constexpr std::uintptr_t IOMUX_PA9 = 0x4042'8050U;
 
   // UART1 register addresses used by this class. TRM Pgs. 1265-1266
-  static constexpr std::uintptr_t UART1_REG_BASE = 0x4010'0000U;
+  static constexpr std::uintptr_t UART1_REG_BASE = 0x4010'0000U; // Datasheet Pg. 59
   static constexpr std::uintptr_t UART1_PWREN = UART1_REG_BASE + 0x800U;
   static constexpr std::uintptr_t UART1_RSTCTL = UART1_REG_BASE + 0x804U;
   static constexpr std::uintptr_t UART1_CLKDIV = UART1_REG_BASE + 0x1000U;
@@ -111,6 +111,7 @@ private:
   // Enables the UART FIFOs.
   static constexpr std::uint32_t CTL0_FEN = (1U << 17U);
   // Enables parity generation/checking when selected by settings.
+  // CTL ENABLE VALUES: TRM Pg. 1299
   static constexpr std::uint32_t LCRH_PEN = (1U << 1U);
   // Selects even parity when set; clear selects odd parity.
   static constexpr std::uint32_t LCRH_EPS = (1U << 2U);
@@ -119,6 +120,7 @@ private:
   // Selects eight data bits per UART frame.
   static constexpr std::uint32_t LCRH_WLEN8 = 3U << 5U;
   // Forces the selected parity value instead of calculating parity.
+  // LINE CONTROL REGISTER VALUES: Pg. 1302
   static constexpr std::uint32_t LCRH_SPS = (1U << 7U);
   // Identifies the RX FIFO threshold field to update.
   static constexpr std::uint32_t IFLS_RX_MASK = 7U << 4U;
@@ -150,6 +152,7 @@ private:
   static constexpr std::uint32_t STAT_RXFE = (1U << 2U);
   // Indicates that the TX FIFO is full.
   static constexpr std::uint32_t STAT_TXFF = (1U << 7U);
+  // Stat flag info: TRM Page. 1250
   // Selects the eight-bit data field from RXDATA.
   static constexpr std::uint32_t RXDATA_MASK = 0xFFU;
   // Marks a framing error on the received byte.
@@ -160,8 +163,10 @@ private:
   static constexpr std::uint32_t RXDATA_BRKERR = (1U << 10U);
   // Marks a receive-overrun error on the received byte.
   static constexpr std::uint32_t RXDATA_OVRERR = (1U << 11U);
+  // RXDATA ERROR Values: Pg. 1262
 
   // Select UART1's peripheral function for PA8 (TX) and PA9 (RX).
+  // Digital Pin Value: Datasheet Pg. 11
   static constexpr std::uint32_t PINCM_PF_UART1 = 2U;
 
   // Connect the PINCM-controlled pin to its selected peripheral function.
@@ -207,7 +212,8 @@ public:
     return { *uart_reg(UART1_STAT), *uart_reg(UART1_IIDX),
              *uart_reg(UART1_CTL0), *uart_reg(UART1_CLKSEL),
              *uart_reg(UART1_PWREN) };
-  }
+  } // Reads current register values. Used for debugging purposes in main to make sure
+    // Register values are working and that the UART driver works as intended.
 
   static void handle_interrupt()
   {
@@ -219,12 +225,14 @@ public:
       case IIDX_RTFG:
         // Processes as long as a byte is available in the queue to process.
         while ((*uart_reg(UART1_STAT) & STAT_RXFE) == 0U) {
-          // Received is the byte received during UART transfer from TX to RX.
+          // The byte is received during UART transfer from TX to RX.
+          // RXFE Page for FIFO full flagging: TRM Pg. 1250
           std::uint32_t const received = *uart_reg(UART1_RXDATA);
           // Combine all UART receive-error bits into one mask for validation.
           constexpr std::uint32_t error_mask =
             RXDATA_FRMERR | RXDATA_PARERR | RXDATA_BRKERR | RXDATA_OVRERR;
           // Checks to see if error is not received. Otherwise, breaks interrupt
+          // Flag Registers: TRM Pg. 1249
           if ((received & error_mask) == 0U) {
             receive_storage[receive_write_cursor] =
               static_cast<std::uint8_t>(received & RXDATA_MASK); // Cursor receives an arriving byte.
@@ -237,7 +245,7 @@ public:
         // RXDATA reads acknowledge the received bytes and leave the handler.
         break;
 
-      // These interrupt causes indicate a UART receive error.
+      // These interrupt causes indicate a UART receive error. Pg. 1274
       case IIDX_FEFG:
       case IIDX_PEFG:
       case IIDX_BEFG:
